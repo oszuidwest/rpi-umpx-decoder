@@ -40,11 +40,11 @@ esac
 
 echo "dtoverlay=$overlay" >> $CONFIG_FILE
 
-# Disable onboard EEPROM for Linux 5.4 and higher
-echo "Is your Linux version 5.4 or higher? (y/n)"
-read -r linux_version
+# Get Linux version
+kernel_version=$(uname -r | awk -F. '{print $1 "." $2}')
 
-if [ "$linux_version" = "y" ] || [ "$linux_version" = "Y" ]; then
+# Check if Linux version is 5.4 or higher and disable onboard EEPROM if necessary
+if [ "$(printf "%s\\n" "5.4" "$kernel_version" | sort -V | head -n1)" = "5.4" ] && [ "$kernel_version" != "5.4" ]; then
     echo "force_eeprom_read=0" >> $CONFIG_FILE
 fi
 
