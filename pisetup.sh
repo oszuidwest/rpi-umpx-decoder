@@ -17,6 +17,23 @@ fi
 # Check if we are running on a Raspberry PI 4
 check_platform
 
+# Check if the micrompx service is running
+if systemctl is-active --quiet micrompx; then
+    echo "MicroMPX service is running. Stopping it now..."
+    
+    # Stop the micrompx service
+    systemctl stop micrompx
+    
+    if [ $? -eq 0 ]; then
+        echo "MicroMPX service stopped successfully. We can now upgrade of reinstall."
+    else
+        echo "Failed to stop the MicroMPX service. Please check the logs for more details."
+		exit 1
+    fi
+else
+    echo "MicroMPX service is not running. Ussuming fresh install."
+fi
+
 # Expand the filesystem
 raspi-config --expand-rootfs
 
