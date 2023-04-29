@@ -29,3 +29,9 @@ apt -qq -y autoremove >/dev/null 2>&1
 # Download and set MicroMPX 64bit
 wget https://www.stereotool.com/download/MicroMPX_Decoder_ARM64 -O /opt/MicroMPX_Decoder
 chmod +x /opt/MicroMPX_Decoder
+
+# Install service
+rm -f /etc/systemd/system/micrompx.service
+wget https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/micrompx.service -O /etc/systemd/system/micrompx.service
+systemctl daemon-reload
+systemctl enable micrompx.service
