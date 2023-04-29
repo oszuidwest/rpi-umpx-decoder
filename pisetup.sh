@@ -42,9 +42,9 @@ ln -fs /usr/share/zoneinfo/Europe/Amsterdam /etc/localtime
 dpkg-reconfigure -f noninteractive tzdata
 
 # Update all packages
-apt -qq -y update >/dev/null 2>&1
-apt -qq -y upgrade >/dev/null 2>&1
-apt -qq -y autoremove >/dev/null 2>&1
+apt -qq -y update
+apt -qq -y upgrade
+apt -qq -y autoremove
 
 # Add the user micrompx if it doesn't exist
 if ! id -u micrompx > /dev/null 2>&1; then
@@ -54,7 +54,8 @@ fi
 # Install dependencies
 apt -qq -y install libasound2
 
-# Download MicroMPX 64bit and make it executable
+# Download and install MicroMPX
+mkdir -p /opt/micrompx
 wget https://download.thimeo.com/MicroMPX_Decoder_ARM64 -O /opt/micrompx/MicroMPX_Decoder
 chmod +x /opt/micrompx/MicroMPX_Decoder
 
