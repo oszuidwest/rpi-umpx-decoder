@@ -22,5 +22,10 @@ ln -fs /usr/share/zoneinfo/Europe/Amsterdam /etc/localtime
 dpkg-reconfigure -f noninteractive tzdata
 
 # Update all packages
-apt update -y -qq
-apt upgrade -y -qq
+apt -qq -y update >/dev/null 2>&1
+apt -qq -y upgrade >/dev/null 2>&1
+apt -qq -y autoremove >/dev/null 2>&1
+
+# Download and set MicroMPX 64bit
+wget https://www.stereotool.com/download/MicroMPX_Decoder_ARM64 -O /opt/MicroMPX_Decoder
+chmod +x /opt/MicroMPX_Decoder
