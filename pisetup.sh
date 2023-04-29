@@ -14,6 +14,9 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+# Check if we are running on a Raspberry PI 4
+check_platform
+
 # Expand the filesystem
 raspi-config --expand-rootfs
 
@@ -27,7 +30,7 @@ apt -qq -y upgrade >/dev/null 2>&1
 apt -qq -y autoremove >/dev/null 2>&1
 
 # Download and set MicroMPX 64bit
-wget https://www.stereotool.com/download/MicroMPX_Decoder_ARM64 -O /opt/MicroMPX_Decoder
+wget https://download.thimeo.com/MicroMPX_Decoder_ARM64 -O /opt/MicroMPX_Decoder
 chmod +x /opt/MicroMPX_Decoder
 
 # Install service
