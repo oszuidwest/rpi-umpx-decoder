@@ -21,10 +21,8 @@ check_platform
 if systemctl is-active --quiet micrompx; then
   echo "MicroMPX service is running. Stopping it now..."
 
-  # Stop the micrompx service
-  systemctl stop micrompx
-
-  if [ $? -eq 0 ]; then
+  # Stop the micrompx service and check the exit code directly
+  if systemctl stop micrompx; then
     echo "MicroMPX service stopped successfully. We can now upgrade or reinstall."
   else
     echo "Failed to stop the MicroMPX service. Please check the logs for more details."
