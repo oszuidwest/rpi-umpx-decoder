@@ -65,3 +65,4 @@ chmod +x /opt/micrompx/MicroMPX_Decoder
 rm -f /etc/systemd/system/micrompx.service
 wget https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/micrompx.service -O /etc/systemd/system/micrompx.service
 systemctl daemon-reload
+service micrompx restart
