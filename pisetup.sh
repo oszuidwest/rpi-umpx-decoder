@@ -31,14 +31,17 @@ apt -qq -y autoremove >/dev/null 2>&1
 
 # Add the user micrompx if it doesn't exist
 if ! id -u micrompx > /dev/null 2>&1; then 
-  useradd micrompx --system --shell /usr/sbin/nologin --home /home/micrompx --comment "micrompx daemon user"
+  useradd micrompx --system --shell /usr/sbin/nologin --comment "micrompx daemon user"
 fi
 
 # Install dependencies
 apt -qq -y install libasound2 
 
+# Create working dir
+mkdir /opt/micrompx
+
 # Download and set MicroMPX 64bit
-wget https://download.thimeo.com/MicroMPX_Decoder_ARM64 -O /opt/MicroMPX_Decoder
+wget https://download.thimeo.com/MicroMPX_Decoder_ARM64 -O /opt/micrompx/MicroMPX_Decoder
 chmod +x /opt/MicroMPX_Decoder
 
 # Install service
