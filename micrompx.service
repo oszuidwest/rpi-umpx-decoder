@@ -5,8 +5,8 @@ Documentation=http://zuidwestfm.nl/
 
 [Service]
 Type=forking
-User=root
-WorkingDirectory=/opt
+User=micrompx
+WorkingDirectory=/home/micrompx
 ExecStart=/opt/MicroMPX_Decoder
 Restart=always
 RestartSec=15

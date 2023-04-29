@@ -29,6 +29,11 @@ apt -qq -y update >/dev/null 2>&1
 apt -qq -y upgrade >/dev/null 2>&1
 apt -qq -y autoremove >/dev/null 2>&1
 
+# Add the user micrompx if it doesn't exist
+if ! id -u micrompx > /dev/null 2>&1; then 
+  useradd micrompx --system --shell /usr/sbin/nologin --home /home/micrompx --comment "micrompx daemon user"
+fi
+
 # Install dependencies
 apt -qq -y install libasound2 
 
