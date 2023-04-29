@@ -12,3 +12,7 @@ raspi-config --expand-rootfs
 # Set the timezone
 ln -fs /usr/share/zoneinfo/Europe/Amsterdam /etc/localtime
 dpkg-reconfigure -f noninteractive tzdata
+
+# Update all packages
+apt update -y -qq
+apt upgrade -y -qq
