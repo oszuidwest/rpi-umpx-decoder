@@ -56,7 +56,7 @@ apt -qq -y install libasound2
 
 # Download and install MicroMPX
 mkdir -p /opt/micrompx
-wget https://download.thimeo.com/MicroMPX_Decoder_ARM64 -O /opt/micrompx/MicroMPX_Decoder
+wget https://www.stereotool.com/download/MicroMPX_Decoder_ARM64_BETA1002-066 -O /opt/micrompx/MicroMPX_Decoder
 chmod +x /opt/micrompx/MicroMPX_Decoder
 
 # Install service
