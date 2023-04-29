@@ -4,13 +4,11 @@ After=network.target
 Documentation=http://zuidwestfm.nl/
 
 [Service]
-Type=forking
+Type=simple
 User=micrompx
 WorkingDirectory=/opt/micrompx
 ExecStart=/opt/micrompx/MicroMPX_Decoder
 Restart=always
-RestartSec=15
-KillSignal=SIGKILL
 
 [Install]
 WantedBy=multi-user.target

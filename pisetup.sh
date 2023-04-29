@@ -40,9 +40,9 @@ apt -qq -y install libasound2
 # Create working dir
 mkdir /opt/micrompx
 
-# Download and set MicroMPX 64bit
+# Download MicroMPX 64bit and make it executable
 wget https://download.thimeo.com/MicroMPX_Decoder_ARM64 -O /opt/micrompx/MicroMPX_Decoder
-chmod +x /opt/MicroMPX_Decoder
+chmod +x /opt/micrompx/MicroMPX_Decoder
 
 # Install service
 rm -f /etc/systemd/system/micrompx.service
