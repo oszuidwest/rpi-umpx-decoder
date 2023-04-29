@@ -54,8 +54,8 @@ fi
 # Install dependencies
 apt -qq -y install libasound2 
 
-# Create working dir
-mkdir /opt/micrompx
+# Create working dir if it doesn't exist
+mkdir -p /opt/micrompx
 
 # Download MicroMPX 64bit and make it executable
 wget https://download.thimeo.com/MicroMPX_Decoder_ARM64 -O /opt/micrompx/MicroMPX_Decoder
@@ -65,4 +65,3 @@ chmod +x /opt/micrompx/MicroMPX_Decoder
 rm -f /etc/systemd/system/micrompx.service
 wget https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/micrompx.service -O /etc/systemd/system/micrompx.service
 systemctl daemon-reload
-systemctl enable micrompx.service
