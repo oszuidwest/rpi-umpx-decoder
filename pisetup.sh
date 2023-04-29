@@ -48,7 +48,7 @@ apt -qq -y autoremove >/dev/null 2>&1
 
 # Add the user micrompx if it doesn't exist
 if ! id -u micrompx > /dev/null 2>&1; then 
-  useradd micrompx --home /home/micrompx --shell /usr/sbin/nologin --comment "micrompx daemon user"
+  useradd -m micrompx --home /home/micrompx --shell /usr/sbin/nologin --comment "micrompx daemon user"
 fi
 
 # Install dependencies
