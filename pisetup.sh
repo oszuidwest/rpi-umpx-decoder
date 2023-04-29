@@ -29,6 +29,9 @@ apt -qq -y update >/dev/null 2>&1
 apt -qq -y upgrade >/dev/null 2>&1
 apt -qq -y autoremove >/dev/null 2>&1
 
+# Install dependencies
+apt -qq -y install libasound2 
+
 # Download and set MicroMPX 64bit
 wget https://download.thimeo.com/MicroMPX_Decoder_ARM64 -O /opt/MicroMPX_Decoder
 chmod +x /opt/MicroMPX_Decoder
