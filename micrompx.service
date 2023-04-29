@@ -6,7 +6,7 @@ Documentation=http://zuidwestfm.nl/
 [Service]
 Type=simple
 User=micrompx
-WorkingDirectory=/opt/micrompx
+WorkingDirectory=/home/micrompx
 ExecStart=/opt/micrompx/MicroMPX_Decoder
 Restart=always
 
