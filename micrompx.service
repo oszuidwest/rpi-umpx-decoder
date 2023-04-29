@@ -1,0 +1,17 @@
+[Unit]
+Description=MicroMPX Decoder
+After=network.target
+Documentation=http://zuidwestfm.nl/
+
+[Service]
+Type=forking
+User=root
+WorkingDirectory=/opt
+ExecStart=/opt/MicroMPX_Decoder
+Restart=always
+RestartSec=15
+KillSignal=SIGKILL
+
+[Install]
+WantedBy=multi-user.target
+Alias=micrompx.service
