@@ -62,7 +62,7 @@ service micrompx restart
 
 echo "Disabling onboard audio..."
 CONFIG_FILE="/boot/config.txt"
-sed -i '/^[^#]*dtparam=audio=on/s/^/#/' "$CONFIG_FILE"
+# sed -i '/^[^#]*dtparam=audio=on/s/^/#/' "$CONFIG_FILE" # We want to use integrated audio for monitoring the demodulated signal
 sed -i '/dtoverlay=vc4-fkms-v3d/ { /audio=off/! s/$/,audio=off/ }' "$CONFIG_FILE"
 sed -i '/dtoverlay=vc4-kms-v3d/ { /noaudio/! s/$/,noaudio/ }' "$CONFIG_FILE"
 
