@@ -6,11 +6,15 @@ CONFIG_FILE="/boot/config.txt"
 # Comment out dtparam=audio=on if it's not already commented out
 sed -i '/^[^#]*dtparam=audio=on/s/^/#/' $CONFIG_FILE
 
-# Disable audio for vc4-fkms-v3d overlay
-sed -i 's/dtoverlay=vc4-fkms-v3d/dtoverlay=vc4-fkms-v3d,audio=off/g' $CONFIG_FILE
+# Check if audio is already disabled for vc4-fkms-v3d overlay, and disable it if not
+if ! grep -q 'dtoverlay=vc4-fkms-v3d,audio=off' $CONFIG_FILE; then
+    sed -i 's/dtoverlay=vc4-fkms-v3d/dtoverlay=vc4-fkms-v3d,audio=off/g' $CONFIG_FILE
+fi
 
-# Disable audio for vc4-kms-v3d overlay
-sed -i 's/dtoverlay=vc4-kms-v3d/dtoverlay=vc4-kms-v3d,noaudio/g' $CONFIG_FILE
+# Check if audio is already disabled for vc4-kms-v3d overlay, and disable it if not
+if ! grep -q 'dtoverlay=vc4-kms-v3d,noaudio' $CONFIG_FILE; then
+    sed -i 's/dtoverlay=vc4-kms-v3d/dtoverlay=vc4-kms-v3d,noaudio/g' $CONFIG_FILE
+fi
 
 # Configure device tree overlay
 echo "Enter the number corresponding to your device:"
@@ -33,19 +37,23 @@ case $device_number in
     5) overlay="hifiberry-dacplusadcpro" ;;
     6) overlay="hifiberry-digi" ;;
     7) overlay="hifiberry-digi-pro" ;;
-    8) overlay="hifiberry-amp" ;;
-    9) overlay="hifiberry-amp3" ;;
     *) echo "Invalid input, exiting."; exit 1 ;;
 esac
 
-echo "dtoverlay=$overlay" >> $CONFIG_FILE
+# Add dtoverlay for HifiBerry if it doesn't exist
+if ! grep -q "dtoverlay=$overlay" $CONFIG_FILE; then
+    echo "dtoverlay=$overlay" >> $CONFIG_FILE
+fi
 
 # Get Linux version
 kernel_version=$(uname -r | awk -F. '{print $1 "." $2}')
 
 # Check if Linux version is 5.4 or higher and disable onboard EEPROM if necessary
 if [ "$(printf "%s\\n" "5.4" "$kernel_version" | sort -V | head -n1)" = "5.4" ] && [ "$kernel_version" != "5.4" ]; then
-    echo "force_eeprom_read=0" >> $CONFIG_FILE
+    # Add force_eeprom_read=0 if it's not there yet
+    if ! grep -q 'force_eeprom_read=0' $CONFIG_FILE; then
+        echo "force_eeprom_read=0" >> $CONFIG_FILE
+    fi
 fi
 
 echo "Configuration updated. Please reboot your system for the changes to take effect."
