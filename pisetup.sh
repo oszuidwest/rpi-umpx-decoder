@@ -56,6 +56,7 @@ apt -qq -y install libasound2
 mkdir -p /opt/micrompx
 wget https://www.stereotool.com/download/MicroMPX_Decoder_ARM64 -O /opt/micrompx/MicroMPX_Decoder
 chmod +x /opt/micrompx/MicroMPX_Decoder
+setcap CAP_NET_BIND_SERVICE=+eip /opt/micrompx/MicroMPX_Decoder
 
 # Install service
 rm -f /etc/systemd/system/micrompx.service
