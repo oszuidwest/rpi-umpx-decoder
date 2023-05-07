@@ -25,8 +25,6 @@ echo "4. DAC+ ADC"
 echo "5. DAC+ ADC PRO"
 echo "6. DIGI+"
 echo "7. DIGI+ PRO"
-echo "8. AMP+ (NOT AMP2!)"
-echo "9. AMP3"
 
 read -r device_number
 case $device_number in
