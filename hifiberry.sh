@@ -3,8 +3,8 @@
 # Disable onboard audio
 CONFIG_FILE="/boot/config.txt"
 
-# Remove dtparam=audio=on
-sed -i '/dtparam=audio=on/d' $CONFIG_FILE
+# Comment out dtparam=audio=on if it's not already commented out
+sed -i '/^[^#]*dtparam=audio=on/s/^/#/' $CONFIG_FILE
 
 # Disable audio for vc4-fkms-v3d overlay
 sed -i 's/dtoverlay=vc4-fkms-v3d/dtoverlay=vc4-fkms-v3d,audio=off/g' $CONFIG_FILE
