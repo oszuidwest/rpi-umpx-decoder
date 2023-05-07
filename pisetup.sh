@@ -62,9 +62,9 @@ service micrompx restart
 
 echo "Disabling onboard audio..."
 CONFIG_FILE="/boot/config.txt"
-sed -i '/^[^#]*dtparam=audio=on/s/^/#/' $CONFIG_FILE
-sed -i 's/dtoverlay=vc4-fkms-v3d/dtoverlay=vc4-fkms-v3d,audio=off/g' $CONFIG_FILE
-sed -i 's/dtoverlay=vc4-kms-v3d/dtoverlay=vc4-kms-v3d,noaudio/g' $CONFIG_FILE
+sed -i '/^[^#]*dtparam=audio=on/s/^/#/' "$CONFIG_FILE"
+sed -i '/dtoverlay=vc4-fkms-v3d/ { /audio=off/! s/$/,audio=off/ }' "$CONFIG_FILE"
+sed -i '/dtoverlay=vc4-kms-v3d/ { /noaudio/! s/$/,noaudio/ }' "$CONFIG_FILE"
 
 echo "Configuring device tree overlay for HifiBerry..."
 echo "Enter the number corresponding to your device:"
