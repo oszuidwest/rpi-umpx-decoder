@@ -4,7 +4,6 @@
 server_ip="<server_ip>"
 server_public_key="<server_public_key>"
 raspberry_address="172.16.0.2/24"
-raspberry_private_key="<raspberry_private_key>"
 
 # Update and install WireGuard
 echo "Updating system and installing WireGuard..."
@@ -23,6 +22,9 @@ if [ ! -f privatekey ] || [ ! -f publickey ]; then
 else
   echo "Key pair already exists in /etc/wireguard. No new keys generated."
 fi
+
+# Read the generated private key
+raspberry_private_key=$(cat privatekey)
 
 # Create WireGuard configuration file
 echo "Creating WireGuard configuration file..."
