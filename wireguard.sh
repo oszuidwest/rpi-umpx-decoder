@@ -13,7 +13,7 @@ apt install -y wireguard
 # Generate key pair if it doesn't exist
 umask 077
 mkdir -p /etc/wireguard
-cd /etc/wireguard
+cd /etc/wireguard || exit
 
 if [ ! -f privatekey ] || [ ! -f publickey ]; then
   echo "Generating new key pair..."
