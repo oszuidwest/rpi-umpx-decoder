@@ -1,9 +1,10 @@
 #!/bin/bash
 
 # Variables (Replace these with the actual values)
-server_ip="<server_ip>"
+server_public_ip="<server_ip>"
 server_public_key="<server_public_key>"
-raspberry_address="172.16.0.2/24"
+network="172.16.0.0/24"
+raspberry_address="172.16.0.2/24" # Assume .1 is the server.
 
 # Update and install WireGuard
 echo "Updating system and installing WireGuard..."
@@ -35,8 +36,8 @@ PrivateKey = ${raspberry_private_key}
 
 [Peer]
 PublicKey = ${server_public_key}
-Endpoint = ${server_ip}:51820
-AllowedIPs = 172.16.0.0/24
+Endpoint = ${server_public_ip}:51820
+AllowedIPs = ${network}
 PersistentKeepalive = 25
 EOL"
 
@@ -44,9 +45,5 @@ EOL"
 echo "Enabling and starting WireGuard..."
 systemctl enable wg-quick@wg0
 systemctl start wg-quick@wg0
-
-# Check connectivity
-echo "Checking connectivity to the server..."
-ping -c 3 ${server_ip}
 
 echo "WireGuard VPN configuration completed!"
