@@ -44,6 +44,14 @@ if ! id -u micrompx > /dev/null 2>&1; then
   useradd -m micrompx --home /home/micrompx --shell /usr/sbin/nologin --comment "micrompx daemon user"
 fi
 
+echo "Checking if the user 'micrompx' is a member of the 'audio' group"
+if groups micrompx | grep -q '\baudio\b'; then
+    echo "User 'micrompx' is already a member of the 'audio' group. Not doing anything."
+else
+    echo "User 'micrompx' is not a member of the 'audio' group. Adding them to the group now..."
+    usermod -aG audio micrompx
+fi
+
 echo "Installing dependencies..."
 apt -qq -y install libasound2
 
