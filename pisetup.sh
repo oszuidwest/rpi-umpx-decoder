@@ -12,7 +12,7 @@ function check_platform() {
 
 # Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
-  echo "This script must be run as root. Please use 'sudo bash pisetup.sh' to run it."
+  echo "This script must be run as root. Please run 'sudo su' first."
   exit 1
 fi
 
