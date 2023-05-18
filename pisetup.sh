@@ -80,7 +80,7 @@ fi
 echo -e "${BLUE}►► Installing dependencies...${NC}"
 apt -qq -y install libasound2 > /dev/null 2>&1
 
-# Download micrompx for Thimeo
+# Download micrompx from Thimeo
 echo -e "${BLUE}►► Downloading and installing MicroMPX...${NC}"
 mkdir -p /opt/micrompx > /dev/null
 wget -q https://www.stereotool.com/download/MicroMPX_Decoder_ARM64 -O /opt/micrompx/MicroMPX_Decoder > /dev/null
