@@ -47,9 +47,9 @@ dpkg-reconfigure -f noninteractive tzdata > /dev/null
 
 # Update the OS
 printf "${BLUE}►► Updating all packages...${NC}\n\n"
-apt -qq -y update > /dev/null
-apt -qq -y full-upgrade > /dev/null
-apt -qq -y autoremove > /dev/null
+apt -qq -y update > /dev/null 2>&1
+apt -qq -y full-upgrade > /dev/null 2>&1
+apt -qq -y autoremove > /dev/null 2>&1
 
 # Add user for micrompx
 printf "${BLUE}►► Adding micrompx user if it doesn't exist...${NC}\n\n"
@@ -67,7 +67,7 @@ fi
 
 # Install dependencies for micrompx
 printf "${BLUE}►► Installing dependencies...${NC}\n\n"
-apt -qq -y install libasound2 > /dev/null
+apt -qq -y install libasound2 > /dev/null 2>&1
 
 # Download micrompx for Thimeo
 printf "${BLUE}►► Downloading and installing MicroMPX...${NC}\n\n"
