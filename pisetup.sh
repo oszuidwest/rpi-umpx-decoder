@@ -7,6 +7,17 @@ readonly YELLOW='\033[0;33m'
 readonly BLUE='\033[1;34m'
 readonly NC='\033[0m' # No Color
 
+# Something fancy for the sysadmin
+clear
+cat << "EOF"
+ ______     _     ___          __       _     ______ __  __ 
+|___  /    (_)   | \ \        / /      | |   |  ____|  \/  |
+   / /_   _ _  __| |\ \  /\  / /__  ___| |_  | |__  | \  / |
+  / /| | | | |/ _` | \ \/  \/ / _ \/ __| __| |  __| | |\/| |
+ / /_| |_| | | (_| |  \  /\  /  __/\__ \ |_  | |    | |  | |
+/_____\__,_|_|\__,_|   \/  \/ \___||___/\__| |_|    |_|  |_|
+EOF
+
 # Hi!
 echo -e "${GREEN}⎎ MicroMPX Setup for Raspberry Pi 4${NC}\n\n"
 
