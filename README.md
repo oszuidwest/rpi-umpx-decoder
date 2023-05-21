@@ -8,4 +8,6 @@ This repository contains the MicroMPX set-up for [ZuidWest FM](https://www.zuidw
 - Download and run the install script with the command `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/pisetup.sh)"`
 
 # How to configure MicroMPX
+- If you want monitoring via UptimeRobot, add the contents of `allowlist.txt` to the MicroMPX configuration file
+
 [WIP]
