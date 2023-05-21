@@ -11,7 +11,7 @@ jobs:
       uses: actions/checkout@v3
 
     - name: Setup JQ
-      uses: chrisdickinson/setup-jq@v1
+      uses: chrisdickinson/setup-yq@v1
 
     - name: Fetch and process IP ranges
       run: |
@@ -19,7 +19,7 @@ jobs:
         url="https://uptimerobot.com/inc/files/ips/IPRanges.json"
 
         # Use curl to get the JSON, then use jq to parse it and format the prefixes as a single line
-        ip_ranges=$(curl -s "$url" | jq -r '.prefixes[] | (.ipv4Prefix // .ipv6Prefix)' | sed '$!s/$/,/' | tr '\n' ' ')
+        ip_ranges=$(curl -s "$url" | yq -r '.prefixes[] | (.ipv4Prefix // .ipv6Prefix)' | sed '$!s/$/,/' | tr '\n' ' ')
 
         # Write the line to the file
         echo "$ip_ranges" > allowlist.txt
