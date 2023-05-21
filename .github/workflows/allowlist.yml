@@ -25,10 +25,6 @@ jobs:
 
         # Write the line to the file
         echo "$ip_ranges" > allowlist.txt
-        
-    - name: Show ips
-      run: |
-        cat allowlist.txt
 
     - name: Commit and push if it's not up to date
       run: |
