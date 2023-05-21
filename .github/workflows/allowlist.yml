@@ -11,23 +11,29 @@ jobs:
       uses: actions/checkout@v3
 
     - name: Setup JQ
-      uses: chrisdickinson/setup-yq@v1
+      run: |
+        sudo apt-get update
+        sudo apt-get install jq -y
 
     - name: Fetch and process IP ranges
       run: |
         # URL of the JSON file
         url="https://uptimerobot.com/inc/files/ips/IPRanges.json"
 
-        # Use curl to get the JSON, then use jq to parse it and format the prefixes as a single line
-        ip_ranges=$(curl -s "$url" | yq -r '.prefixes[] | (.ipv4Prefix // .ipv6Prefix)' | sed '$!s/$/,/' | tr '\n' ' ')
+        # Use curl to get the JSON, then use jq to parse it and format the ipv4 prefixes as a single line
+        ip_ranges=$(curl -s "$url" | jq -r '.prefixes[] | .ipv4Prefix // empty' | sed '$!s/$/,/' | tr '\n' ' ')
 
         # Write the line to the file
         echo "$ip_ranges" > allowlist.txt
+        
+    - name: Show ips
+      run: |
+        cat allowlist.txt
 
     - name: Commit and push if it's not up to date
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add .
-        git diff --quiet && git diff --staged --quiet || git commit -m "Updated IP ranges"
+        git diff --quiet && git diff --staged --quiet || git commit -m "Updated allowlist IP ranges"
         git push
