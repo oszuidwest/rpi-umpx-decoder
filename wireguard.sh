@@ -4,7 +4,7 @@
 SERVER_PUBLIC_IP="<server_ip>"
 SERVER_PUBLIC_KEY="<server_public_key>"
 NETWORK="172.16.0.0/24"
-RASPBERRY_ADDRESS="172.16.0.2/24" # Assume .1 is the server.
+RASPBERRY_ADDRESS="172.16.0.2/24" # Assume .1 is the endpoint
 
 # Update and install WireGuard
 echo "Updating system and installing WireGuard..."
