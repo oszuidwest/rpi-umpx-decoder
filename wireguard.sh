@@ -12,10 +12,12 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
-# Update and install WireGuard
-echo "Updating system and installing WireGuard..."
-apt update
-apt install -y wireguard
+# Ensure wg command is available
+if ! command -v wg &> /dev/null; then
+  echo "WireGuard does not seem to be installed. Updating system and installing WireGuard..."
+  apt update
+  apt install -y wireguard
+fi
 
 # Generate key pair if it doesn't exist
 umask 077
@@ -49,7 +51,9 @@ EOL"
 
 # Enable and start WireGuard
 echo "Enabling and starting WireGuard..."
-systemctl enable wg-quick@wg0
-systemctl start wg-quick@wg0
+if ! systemctl enable wg-quick@wg0 || ! systemctl start wg-quick@wg0; then
+  echo "Enabling or starting WireGuard service failed."
+  exit 1
+fi
 
 echo "WireGuard VPN configuration completed!"
