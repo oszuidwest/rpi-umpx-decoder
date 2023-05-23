@@ -26,7 +26,7 @@ cd /etc/wireguard || exit
 
 if [[ ! -f privatekey ]] || [[ ! -f publickey ]]; then
   echo "Generating new key pair..."
-  wg genkey | tee privatekey | wg pubkey | tee publickey
+  wg genkey | tee privatekey | wg pubkey > publickey
   echo "New key pair has been generated and saved in /etc/wireguard."
 else
   echo "Key pair already exists in /etc/wireguard. No new keys generated."
