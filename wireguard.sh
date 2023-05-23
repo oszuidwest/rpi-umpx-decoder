@@ -6,6 +6,12 @@ SERVER_PUBLIC_KEY="<server_public_key>"
 NETWORK="172.16.0.0/24"
 RASPBERRY_ADDRESS="172.16.0.2/24" # Assume .1 is the endpoint
 
+# Check if running as root
+if [[ "$(id -u)" -ne 0 ]]; then
+  echo "This script must be run as root. Please run 'sudo su' first."
+  exit 1
+fi
+
 # Update and install WireGuard
 echo "Updating system and installing WireGuard..."
 apt update
