@@ -15,8 +15,8 @@ fi
 # Ensure wg command is available
 if ! command -v wg &> /dev/null; then
   echo "WireGuard does not seem to be installed. Updating system and installing WireGuard..."
-  apt update
-  apt install -y wireguard
+  apt update -qq -y
+  apt install  -qq -y wireguard
 fi
 
 # Generate key pair if it doesn't exist
