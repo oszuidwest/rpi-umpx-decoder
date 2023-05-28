@@ -2,13 +2,13 @@
 
 # Define the process and URLs
 PROCESS="/opt/micrompx/MicroMPX_Decoder"
-GENERAL_HEARTBEAT="https://heartbeat.uptimerobot.com/xxxxx"
-MICROMPX_MONITOR="https://heartbeat.uptimerobot.com/xxxxxxx"  # Update this as per your requirements
+GENERAL_HEARTBEAT="https://heartbeat.uptimerobot.com/xxx"
+MICROMPX_MONITOR="https://heartbeat.uptimerobot.com/xxx"  # Update this as per your requirements
 
 # Define the cron jobs
 CRON_JOBS=(
-"* * * * * /usr/bin/curl -s $GENERAL_HEARTBEAT > /dev/null"
-"* * * * * pgrep -f $PROCESS > /dev/null && /usr/bin/curl -s $MICROMPX_MONITOR > /dev/null"
+"*/1 * * * * wget --spider $GENERAL_HEARTBEAT >/dev/null 2>&1"
+"*/1 * * * * pgrep -f $PROCESS > /dev/null && wget --spider $MICROMPX_MONITOR >/dev/null 2>&1"
 )
 
 # Check each cron job and add it if it doesn't exist
