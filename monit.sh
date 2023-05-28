@@ -16,8 +16,7 @@ for job in "${CRON_JOBS[@]}"; do
     # Check for existing crontab
     if crontab -l 2>/dev/null; then
         # Check if cron job exists
-        crontab -l | grep -q "$job"
-        if [[ $? -ne 0 ]]; then
+        if ! crontab -l | grep -q "$job"; then
             (crontab -l; echo "$job") | crontab -
         fi
     else
