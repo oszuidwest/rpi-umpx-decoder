@@ -5,6 +5,8 @@ readonly SERVER_PUBLIC_IP="<server_ip>"
 readonly SERVER_PUBLIC_KEY="<server_public_key>"
 readonly NETWORK="172.16.0.0/24"
 readonly RASPBERRY_ADDRESS="172.16.0.2/24" # Assume .1 is the endpoint
+
+# Only change these paths if you know what you're doing
 readonly PRIVATE_KEY_PATH="/etc/wireguard/privatekey"
 readonly PUBLIC_KEY_PATH="/etc/wireguard/publickey"
 
