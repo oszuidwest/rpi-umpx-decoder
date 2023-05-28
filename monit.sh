@@ -8,7 +8,7 @@ MICROMPX_MONITOR="https://heartbeat.uptimerobot.com/xxx"  # Update this as per y
 # Define the cron jobs
 CRON_JOBS=(
 "*/1 * * * * wget --spider \"$GENERAL_HEARTBEAT\" >/dev/null 2>&1"
-"*/1 * * * * pgrep -f $PROCESS > /dev/null && wget --spider \"$MICROMPX_MONITOR\" >/dev/null 2>&1"
+"*/1 * * * * if pid=\$(pgrep -f $PROCESS); then wget --spider \"$MICROMPX_MONITOR\" >/dev/null 2>&1; fi"
 )
 
 # Check each cron job and add it if it doesn't exist
