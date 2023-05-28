@@ -47,11 +47,10 @@ AllowedIPs = ${NETWORK}
 PersistentKeepalive = 25
 EOL"
 
-# Enable and start WireGuard
-echo "Enabling and starting WireGuard..."
-if ! systemctl enable wg-quick@wg0 || ! systemctl start wg-quick@wg0; then
-  echo "Enabling or starting WireGuard service failed."
-  exit 1
-fi
+# Bring up the WireGuard interface
+wg-quick up wg0
+
+# Enable the WireGuard interface on boot
+systemctl enable wg-quick@wg0
 
 echo "WireGuard VPN configuration completed!"
