@@ -14,7 +14,7 @@ This repository contains the MicroMPX set-up for [ZuidWest FM](https://www.zuidw
 # How to add the Raspberry Pi to the VPN
 - Download `https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/vpn.sh`
 - Fill in the variables at the top of `vpn.sh`
-- Run `chmod +` vpn.sh` to make the script executable
+- Run `chmod + x vpn.sh` to make the script executable
 - Run `./vpn.sh` and reboot
 - Check with `ip a` if you have an interface named `wg0` with the correct IP
 - If the `wg0` interface is not showing, enable debugging with `modprobe wireguard && echo module wireguard +p > /sys/kernel/debug/dynamic_debug/control` and `tail -f /var/log/syslog` to look for errors
