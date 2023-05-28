@@ -1,10 +1,12 @@
 #!/bin/bash
 
 # Variables (Replace these with the actual values)
-SERVER_PUBLIC_IP="<server_ip>"
-SERVER_PUBLIC_KEY="<server_public_key>"
-NETWORK="172.16.0.0/24"
-RASPBERRY_ADDRESS="172.16.0.2/24" # Assume .1 is the endpoint
+readonly SERVER_PUBLIC_IP="<server_ip>"
+readonly SERVER_PUBLIC_KEY="<server_public_key>"
+readonly NETWORK="172.16.0.0/24"
+readonly RASPBERRY_ADDRESS="172.16.0.2/24" # Assume .1 is the endpoint
+readonly PRIVATE_KEY_PATH="/etc/wireguard/privatekey"
+readonly PUBLIC_KEY_PATH="/etc/wireguard/publickey"
 
 # Check if running as root
 if [[ "$(id -u)" -ne 0 ]]; then
@@ -12,35 +14,31 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
-# Ensure wg command is available
-if ! command -v wg &> /dev/null; then
-  echo "WireGuard does not seem to be installed. Updating system and installing WireGuard..."
-  apt update -qq -y
-  apt install  -qq -y wireguard
+# Check if WireGuard is installed, if not, install it
+if ! command -v wg >/dev/null 2>&1; then
+  echo "WireGuard is not installed. Updating system and installing WireGuard..."
+  apt update -qq -y && apt install -qq -y wireguard
 fi
 
-# Generate key pair if it doesn't exist
-umask 077
-mkdir -p /etc/wireguard
-cd /etc/wireguard || exit
-
-if [[ ! -f privatekey ]] || [[ ! -f publickey ]]; then
-  echo "Generating new key pair..."
-  wg genkey | tee privatekey | wg pubkey > publickey
-  echo "New key pair has been generated and saved in /etc/wireguard."
+# Check if the server keys exist. If not, generate them
+if [[ -f "$PRIVATE_KEY_PATH" ]] && [[ -f "$PUBLIC_KEY_PATH" ]]; then
+    echo "Server keys already exist. No action required."
 else
-  echo "Key pair already exists in /etc/wireguard. No new keys generated."
+    echo "Server keys are missing. Generating new keys..."
+    rm -f "$PRIVATE_KEY_PATH" "$PUBLIC_KEY_PATH"
+    umask 077
+    wg genkey | tee "$PRIVATE_KEY_PATH" | wg pubkey > "$PUBLIC_KEY_PATH"
 fi
 
 # Read the generated private key
-RASPBERRY_PRIVATE_KEY="$(cat privatekey)"
+GENERATED_PRIVATE_KEY="$(cat $PRIVATE_KEY_PATH)"
 
 # Create WireGuard configuration file
 echo "Creating WireGuard configuration file..."
 bash -c "cat > /etc/wireguard/wg0.conf << EOL
 [Interface]
 Address = ${RASPBERRY_ADDRESS}
-PrivateKey = ${RASPBERRY_PRIVATE_KEY}
+PrivateKey = ${GENERATED_PRIVATE_KEY}
 
 [Peer]
 PublicKey = ${SERVER_PUBLIC_KEY}
