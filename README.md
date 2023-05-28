@@ -9,7 +9,7 @@ This repository contains the MicroMPX set-up for [ZuidWest FM](https://www.zuidw
 
 # How to configure MicroMPX
 - After a reboot MicroMPX should be running on `http://{{ip}}:8080`
-- If you want monitoring via UptimeRobot, add the contents of `allowlist.txt` to the MicroMPX configuration file
+- If you want monitoring via UptimeRobot, add the contents of `allowlist.txt` to the `Whitelist=` section of hte MicroMPX configuration file which is at `/home/micrompx/.MicroMPX_Decoder.rc`
 
 # How to add the Raspberry Pi to the VPN
 - Download `https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/vpn.sh`
