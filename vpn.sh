@@ -26,35 +26,27 @@ if (( $(id -u) != 0 )); then
   exit 1
 fi
 
-# Detect the package manager
-if command -v apt &>/dev/null; then
-  PM="apt"
-elif command -v yum &>/dev/null; then
-  PM="yum"
-elif command -v dnf &>/dev/null; then
-  PM="dnf"
-else
-  echo "Error: Unsupported distribution. Please use Ubuntu, CentOS, or Debian."
-  exit 1
-fi
-
 # Ensure WireGuard is installed
 if ! command -v wg &>/dev/null; then
   echo "WireGuard is not installed. Updating system and installing WireGuard..."
-  $PM update -qq -y && $PM install -qq -y wireguard || {
+  if ! apt update -qq -y; then
+    echo "Error: Failed to update the system."
+    exit 1
+  fi
+  if ! apt install -qq -y wireguard; then
     echo "Error: Failed to install WireGuard."
     exit 1
-  }
+  fi
 fi
 
 # Generate server keys if they do not exist
 if [[ ! -f $PRIVATE_KEY_PATH || ! -f $PUBLIC_KEY_PATH ]]; then
   echo "Server keys are missing. Generating new keys..."
   umask 077
-  wg genkey | tee "$PRIVATE_KEY_PATH" | wg pubkey > "$PUBLIC_KEY_PATH" || {
+  if ! wg genkey | tee "$PRIVATE_KEY_PATH" | wg pubkey > "$PUBLIC_KEY_PATH"; then
     echo "Error: Failed to generate keys."
     exit 1
-  }
+  fi
 fi
 
 # Ensure the server keys are readable and not empty
