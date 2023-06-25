@@ -1,5 +1,17 @@
 #!/bin/bash
 
+# Print usage information if the script is run with the wrong number of arguments
+if (( $# < 4 )); then
+  echo "Usage: $0 SERVER_PUBLIC_IP SERVER_PUBLIC_KEY NETWORK RASPBERRY_ADDRESS"
+  echo "All four arguments are mandatory."
+  echo "Alternatively, these can be set as environment variables:"
+  echo "  - SERVER_PUBLIC_IP"
+  echo "  - SERVER_PUBLIC_KEY"
+  echo "  - NETWORK"
+  echo "  - RASPBERRY_ADDRESS"
+  exit 1
+fi
+
 # Variables (Pass these as arguments or set as environment variables)
 SERVER_PUBLIC_IP="${1:-${SERVER_PUBLIC_IP}}"
 SERVER_PUBLIC_KEY="${2:-${SERVER_PUBLIC_KEY}}"
@@ -19,12 +31,6 @@ for var in SERVER_PUBLIC_IP SERVER_PUBLIC_KEY NETWORK RASPBERRY_ADDRESS; do
     exit 1
   fi
 done
-
-# Ensure the script is running as root
-if (( $(id -u) != 0 )); then
-  echo "Error: This script must be run as root."
-  exit 1
-fi
 
 # Ensure WireGuard is installed
 if ! command -v wg &>/dev/null; then
