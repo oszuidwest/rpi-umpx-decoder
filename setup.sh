@@ -24,7 +24,7 @@ cat << "EOF"
 EOF
 
 # Hi!
-echo -e "${GREEN}⎎ MicroMPX Setup for Raspberry Pi 4${NC}\n\n"
+echo -e "${GREEN}⎎ MicroMPX Setup for Raspberry Pi${NC}\n\n"
 
 # Check if running as root
 if [[ "$(id -u)" -ne 0 ]]; then
