@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 
-# Set some colors
-readonly GREEN='\033[1;32m'
-readonly RED='\033[1;31m'
-readonly YELLOW='\033[0;33m'
-readonly BLUE='\033[1;34m'
-readonly NC='\033[0m' # No Color
+# Start with a clean terminal
+clear
+
+# Download the functions library
+curl -s -o /tmp/functions.sh https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh
+
+# Source the functions file
+source /tmp/functions.sh
+
+# Set color variables
+set_colors
 
 # Something fancy for the sysadmin
 clear
@@ -21,23 +26,14 @@ EOF
 # Hi!
 echo -e "${GREEN}⎎ MicroMPX Setup for Raspberry Pi 4${NC}\n\n"
 
-# Function that checks if this is a supported platform
-check_platform() {
-  if ! grep -q "Raspberry Pi 4" /proc/device-tree/model > /dev/null; then
-    echo -e "${RED}** NOT RUNNING ON A RASPBERRY PI 4 **${NC}"
-    echo -e "${YELLOW}This script is only tested on a Raspberry Pi 4. Press Enter to continue anyway...${NC}"
-    read -r
-  fi
-}
-
 # Check if running as root
 if [[ "$(id -u)" -ne 0 ]]; then
   echo -e "${RED}This script must be run as root. Please run 'sudo su' first.${NC}"
   exit 1
 fi
 
-# Check if we are running on a Raspberry PI 4
-check_platform
+# Check if we are running on a Raspberry Pi 3 or newer
+check_rpi_model 3
 
 # Check and stop micrompx service if running
 echo -e "${BLUE}►► Checking and stopping MicroMPX service if running...${NC}"
@@ -52,15 +48,10 @@ echo -e "${BLUE}►► Expanding filesystem...${NC}"
 raspi-config --expand-rootfs > /dev/null
 
 # Timezone configuration
-echo -e "${BLUE}►► Setting timezone to Europe/Amsterdam...${NC}"
-ln -fs /usr/share/zoneinfo/Europe/Amsterdam /etc/localtime > /dev/null
-dpkg-reconfigure -f noninteractive tzdata > /dev/null
+set_timezone Europe/Amsterdam
 
 # Update the OS
-echo -e "${BLUE}►► Updating all packages...${NC}"
-apt -qq -y update > /dev/null 2>&1
-apt -qq -y full-upgrade > /dev/null 2>&1
-apt -qq -y autoremove > /dev/null 2>&1
+update_os silent
 
 # Add user for micrompx
 echo -e "${BLUE}►► Adding micrompx user if it doesn't exist...${NC}"
@@ -77,8 +68,7 @@ else
 fi
 
 # Install dependencies for micrompx
-echo -e "${BLUE}►► Installing dependencies...${NC}"
-apt -qq -y install libasound2 > /dev/null 2>&1
+install_packages silent libasound2
 
 # Download micrompx from Thimeo
 echo -e "${BLUE}►► Downloading and installing MicroMPX...${NC}"
