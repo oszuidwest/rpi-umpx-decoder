@@ -12,6 +12,16 @@ source /tmp/functions.sh
 # Set color variables
 set_colors
 
+# Check if running as root
+are_we_root
+
+# Check if this is Linux
+is_this_linux
+is_this_os_64bit
+
+# Check if we are running on a Raspberry Pi 3 or newer
+check_rpi_model 3
+
 # Something fancy for the sysadmin
 cat << "EOF"
  ______     _     ___          __       _     ______ __  __ 
@@ -24,12 +34,6 @@ EOF
 
 # Hi!
 echo -e "${GREEN}⎎ MicroMPX Setup for Raspberry Pi${NC}\n\n"
-
-# Check if running as root
-are_we_root
-
-# Check if we are running on a Raspberry Pi 3 or newer
-check_rpi_model 3
 
 # Check and stop micrompx service if running
 echo -e "${BLUE}►► Checking and stopping MicroMPX service if running...${NC}"

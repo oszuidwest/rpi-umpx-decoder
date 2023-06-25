@@ -18,6 +18,13 @@ clear
 # Check if running as root
 are_we_root
 
+# Check if this is Linux
+is_this_linux
+is_this_os_64bit
+
+# Check if we are running on a Raspberry Pi 3 or newer
+check_rpi_model 3
+
 # Print usage information if the script is run with the wrong number of arguments
 if (( $# < 4 )); then
   echo "Usage: $0 SERVER_PUBLIC_IP SERVER_PUBLIC_KEY NETWORK RASPBERRY_ADDRESS"
