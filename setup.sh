@@ -27,10 +27,7 @@ EOF
 echo -e "${GREEN}⎎ MicroMPX Setup for Raspberry Pi${NC}\n\n"
 
 # Check if running as root
-if [[ "$(id -u)" -ne 0 ]]; then
-  echo -e "${RED}This script must be run as root. Please run 'sudo su' first.${NC}"
-  exit 1
-fi
+are_we_root
 
 # Check if we are running on a Raspberry Pi 3 or newer
 check_rpi_model 3
