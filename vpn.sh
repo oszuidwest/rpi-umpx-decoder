@@ -1,4 +1,22 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+# Start with a clean terminal
+clear
+
+# Download the functions library
+curl -s -o /tmp/functions.sh https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh
+
+# Source the functions file
+source /tmp/functions.sh
+
+# Set color variables
+set_colors
+
+# Start with a clean terminal
+clear
+
+# Check if running as root
+are_we_root
 
 # Print usage information if the script is run with the wrong number of arguments
 if (( $# < 4 )); then
@@ -33,17 +51,8 @@ for var in SERVER_PUBLIC_IP SERVER_PUBLIC_KEY NETWORK RASPBERRY_ADDRESS; do
 done
 
 # Ensure WireGuard is installed
-if ! command -v wg &>/dev/null; then
-  echo "WireGuard is not installed. Updating system and installing WireGuard..."
-  if ! apt update -qq -y; then
-    echo "Error: Failed to update the system."
-    exit 1
-  fi
-  if ! apt install -qq -y wireguard; then
-    echo "Error: Failed to install WireGuard."
-    exit 1
-  fi
-fi
+update_os silent
+install_packages silent wireguard
 
 # Generate server keys if they do not exist
 if [[ ! -f $PRIVATE_KEY_PATH || ! -f $PUBLIC_KEY_PATH ]]; then
