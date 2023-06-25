@@ -70,14 +70,14 @@ install_packages silent libasound2
 # Download micrompx from Thimeo
 echo -e "${BLUE}►► Downloading and installing MicroMPX...${NC}"
 mkdir -p /opt/micrompx > /dev/null
-wget -q https://www.stereotool.com/download/MicroMPX_Decoder_ARM64 -O /opt/micrompx/MicroMPX_Decoder > /dev/null
+curl -s -o /opt/micrompx/MicroMPX_Decoder https://www.stereotool.com/download/MicroMPX_Decoder_ARM64
 chmod +x /opt/micrompx/MicroMPX_Decoder > /dev/null
 setcap CAP_NET_BIND_SERVICE=+eip /opt/micrompx/MicroMPX_Decoder > /dev/null
 
 # Add service
 echo -e "${BLUE}►► Installing MicroMPX service...${NC}"
 rm -f /etc/systemd/system/micrompx.service > /dev/null
-wget -q https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/micrompx.service -O /etc/systemd/system/micrompx.service > /dev/null
+curl -s -o /etc/systemd/system/micrompx.service https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/micrompx.service
 systemctl daemon-reload > /dev/null
 systemctl enable micrompx > /dev/null
 
