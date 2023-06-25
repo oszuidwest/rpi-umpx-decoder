@@ -13,7 +13,6 @@ source /tmp/functions.sh
 set_colors
 
 # Something fancy for the sysadmin
-clear
 cat << "EOF"
  ______     _     ___          __       _     ______ __  __ 
 |___  /    (_)   | \ \        / /      | |   |  ____|  \/  |
