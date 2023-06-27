@@ -4,7 +4,10 @@
 clear
 
 # Download the functions library
-curl -s -o /tmp/functions.sh https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh
+if ! curl -s -o /tmp/functions.sh https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh; then
+  echo -e  "*** Failed to download functions library. Please check your network connection! ***"
+  exit 1
+fi
 
 # Source the functions file
 source /tmp/functions.sh
@@ -25,6 +28,9 @@ is_this_os_64bit
 # Check if we are running on a Raspberry Pi 3 or newer
 check_rpi_model 3
 
+
+##-----------------------------------------------------
+## THIS NEEDS A REFACTOR WITH THE ASK_USER FUNCTION
 # Print usage information if the script is run with the wrong number of arguments
 if (( $# < 4 )); then
   echo "Usage: $0 SERVER_PUBLIC_IP SERVER_PUBLIC_KEY NETWORK RASPBERRY_ADDRESS"
@@ -42,6 +48,8 @@ SERVER_PUBLIC_IP="${1:-${SERVER_PUBLIC_IP}}"
 SERVER_PUBLIC_KEY="${2:-${SERVER_PUBLIC_KEY}}"
 NETWORK="${3:-${NETWORK}}"
 RASPBERRY_ADDRESS="${4:-${RASPBERRY_ADDRESS}}" 
+
+##-----------------------------------------------------
 
 # Paths
 WIREGUARD_PATH="/etc/wireguard"
