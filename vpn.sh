@@ -28,42 +28,17 @@ is_this_os_64bit
 # Check if we are running on a Raspberry Pi 3 or newer
 check_rpi_model 3
 
-
-##-----------------------------------------------------
-## THIS NEEDS A REFACTOR WITH THE ASK_USER FUNCTION
-# Print usage information if the script is run with the wrong number of arguments
-if (( $# < 4 )); then
-  echo "Usage: $0 SERVER_PUBLIC_IP SERVER_PUBLIC_KEY NETWORK RASPBERRY_ADDRESS"
-  echo "All four arguments are mandatory."
-  echo "Alternatively, these can be set as environment variables:"
-  echo "  - SERVER_PUBLIC_IP"
-  echo "  - SERVER_PUBLIC_KEY"
-  echo "  - NETWORK"
-  echo "  - RASPBERRY_ADDRESS"
-  exit 1
-fi
-
-# Variables (Pass these as arguments or set as environment variables)
-SERVER_PUBLIC_IP="${1:-${SERVER_PUBLIC_IP}}"
-SERVER_PUBLIC_KEY="${2:-${SERVER_PUBLIC_KEY}}"
-NETWORK="${3:-${NETWORK}}"
-RASPBERRY_ADDRESS="${4:-${RASPBERRY_ADDRESS}}" 
-
-##-----------------------------------------------------
+# Ask for input for variables
+ask_user "SERVER_PUBLIC_IP" "127.0.0.1" "Enter the ip-address of the Wireguard server" "str"
+ask_user "SERVER_PUBLIC_KEY" "y" "Enter the public key of the Wirguard server" "str"
+ask_user "NETWORK" "172.16.1.0/24" "Enter the network range you want to allow to connect" "str"
+ask_user "RASPBERRY_ADDRESS" "172.16.1.2/32" "Enter the private ip-address this device should have" "str"
 
 # Paths
 WIREGUARD_PATH="/etc/wireguard"
 PRIVATE_KEY_PATH="${WIREGUARD_PATH}/privatekey"
 PUBLIC_KEY_PATH="${WIREGUARD_PATH}/publickey"
 CONFIGURATION_PATH="${WIREGUARD_PATH}/wg0.conf"
-
-# Ensure required variables are set
-for var in SERVER_PUBLIC_IP SERVER_PUBLIC_KEY NETWORK RASPBERRY_ADDRESS; do
-  if [[ -z ${!var} ]]; then
-    echo "Error: $var is not set."
-    exit 1
-  fi
-done
 
 # Ensure WireGuard is installed
 update_os silent
