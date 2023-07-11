@@ -56,8 +56,8 @@ fi
 
 # Ensure the server keys are readable and not empty
 for key_path in $PRIVATE_KEY_PATH $PUBLIC_KEY_PATH; do
-  if [[ ! -r ${!key_path} || ! -s ${!key_path} ]]; then
-    echo "Error: The file at ${!key_path} is not readable or is empty."
+  if [[ ! -r $key_path || ! -s $key_path ]]; then
+    echo "Error: The file at $key_path is not readable or is empty."
     exit 1
   fi
 done
