@@ -82,9 +82,12 @@ if [[ ! -r $CONFIGURATION_PATH || ! -s $CONFIGURATION_PATH ]]; then
   exit 1
 fi
 
-# Enable the WireGuard interface on boot
-echo -e "${BLUE}►► Enabling the wg0 interface on boot...${NC}"
-systemctl enable wg-quick@wg0
+# Check if the WireGuard interface needs to be enabled on boot
+if ! systemctl is-enabled --quiet wg-quick@wg0
+then
+    echo -e "${BLUE}►► Enabling the wg0 interface on boot...${NC}"
+    systemctl enable wg-quick@wg0
+fi
 
 # Bring up the WireGuard interface
 if ip link show wg0 &> /dev/null; then
