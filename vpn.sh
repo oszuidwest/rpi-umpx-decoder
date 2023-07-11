@@ -54,14 +54,6 @@ if [[ ! -f $PRIVATE_KEY_PATH || ! -f $PUBLIC_KEY_PATH ]]; then
   fi
 fi
 
-# Ensure the server keys are readable and not empty
-for key_path in $PRIVATE_KEY_PATH $PUBLIC_KEY_PATH; do
-  if [[ ! -r $key_path || ! -s $key_path ]]; then
-    echo "Error: The file at $key_path is not readable or is empty."
-    exit 1
-  fi
-done
-
 # Read the generated keys
 GENERATED_PRIVATE_KEY=$(<"$PRIVATE_KEY_PATH")
 GENERATED_PUBLIC_KEY=$(<"$PUBLIC_KEY_PATH")
@@ -90,20 +82,13 @@ if [[ ! -r $CONFIGURATION_PATH || ! -s $CONFIGURATION_PATH ]]; then
   exit 1
 fi
 
-# Bring up the WireGuard interface
-if ! wg-quick up wg0; then
-  echo "Error: Failed to bring up the WireGuard interface."
-  exit 1
-fi
-
-# Ensure the WireGuard service is active
-if ! systemctl is-active --quiet wg-quick@wg0; then
-  echo "Error: The WireGuard service is not active."
-  exit 1
-fi
-
-# Enable the WireGuard service on boot
+# Enable the WireGuard interface on boot
+echo -e "${BLUE}►► Enabling the wg0 interface on boot...${NC}"
 systemctl enable wg-quick@wg0
+
+# Bring up the WireGuard interface
+echo -e "${BLUE}►► Bringing up WireGuard wg0...${NC}"
+wg-quick up wg0
 
 # Fin 
 echo -e "\n${GREEN}✓ Success!${NC}"
