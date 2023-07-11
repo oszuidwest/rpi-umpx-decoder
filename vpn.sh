@@ -87,8 +87,14 @@ echo -e "${BLUE}►► Enabling the wg0 interface on boot...${NC}"
 systemctl enable wg-quick@wg0
 
 # Bring up the WireGuard interface
-echo -e "${BLUE}►► Bringing up WireGuard wg0...${NC}"
-wg-quick up wg0
+if ip link show wg0 &> /dev/null; then
+    echo -e "${BLUE}►► Restarting wg0...${NC}"
+    wg-quick down wg0
+    wg-quick up wg0
+else
+    echo -e "${BLUE}►► Bringing wg0 up...${NC}"
+    wg-quick up wg0
+fi
 
 # Fin 
 echo -e "\n${GREEN}✓ Success!${NC}"
