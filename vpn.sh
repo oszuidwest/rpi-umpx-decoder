@@ -55,15 +55,16 @@ if [[ ! -f $PRIVATE_KEY_PATH || ! -f $PUBLIC_KEY_PATH ]]; then
 fi
 
 # Ensure the server keys are readable and not empty
-for key_path in PRIVATE_KEY_PATH PUBLIC_KEY_PATH; do
+for key_path in $PRIVATE_KEY_PATH $PUBLIC_KEY_PATH; do
   if [[ ! -r ${!key_path} || ! -s ${!key_path} ]]; then
     echo "Error: The file at ${!key_path} is not readable or is empty."
     exit 1
   fi
 done
 
-# Read the generated private key
+# Read the generated keys
 GENERATED_PRIVATE_KEY=$(<"$PRIVATE_KEY_PATH")
+GENERATED_PUBLIC_KEY=$(<"$PUBLIC_KEY_PATH")
 
 # Backup old configuration file if it exists
 if [[ -f $CONFIGURATION_PATH ]]; then
@@ -104,4 +105,8 @@ fi
 # Enable the WireGuard service on boot
 systemctl enable wg-quick@wg0
 
-echo "WireGuard VPN configuration completed!"
+# Fin 
+echo -e "\n${GREEN}✓ Success!${NC}"
+echo -e "There should now be an interface named ${BOLD}wg0${NC} on this machine."
+echo -e "The IP of the WireGuard interface is ${BOLD}$RASPBERRY_ADDRESS${NC}."
+echo -e "The public key to put in the server is ${BOLD}$GENERATED_PUBLIC_KEY${NC}.\n"
