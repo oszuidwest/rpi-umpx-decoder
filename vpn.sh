@@ -93,5 +93,5 @@ wg-quick up wg0
 # Fin 
 echo -e "\n${GREEN}✓ Success!${NC}"
 echo -e "There should now be an interface named ${BOLD}wg0${NC} on this machine."
-echo -e "The IP of the WireGuard interface is ${BOLD}$RASPBERRY_ADDRESS${NC}."
-echo -e "The public key to put in the server is ${BOLD}$GENERATED_PUBLIC_KEY${NC}.\n"
+echo -e "The IP of the WireGuard interface is ${BOLD}$RASPBERRY_ADDRESS${NC}"
+echo -e "The public key to put in the server is ${BOLD}$GENERATED_PUBLIC_KEY${NC}\n"
