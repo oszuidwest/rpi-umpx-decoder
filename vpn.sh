@@ -30,7 +30,7 @@ check_rpi_model 3
 
 # Ask for input for variables
 ask_user "SERVER_PUBLIC_IP" "127.0.0.1" "Enter the ip-address of the Wireguard server" "str"
-ask_user "SERVER_PUBLIC_KEY" "y" "Enter the public key of the Wirguard server" "str"
+ask_user "SERVER_PUBLIC_KEY" "GQ4G7V+uRFRbqzYTgNHLd58o+RNPUW99L7Nc7mTt2Hs=" "Enter the public key of the Wirguard server" "str"
 ask_user "NETWORK" "172.16.1.0/24" "Enter the network range you want to allow to connect" "str"
 ask_user "RASPBERRY_ADDRESS" "172.16.1.2/32" "Enter the private ip-address this device should have" "str"
 
