@@ -76,7 +76,7 @@ install_packages silent libasound2
 # Download micrompx from Thimeo
 echo -e "${BLUE}►► Downloading and installing MicroMPX...${NC}"
 mkdir -p /opt/micrompx > /dev/null
-curl -s -o /opt/micrompx/MicroMPX_Decoder https://www.stereotool.com/download/MicroMPX_Decoder_ARM64
+curl -s -o /opt/micrompx/MicroMPX_Decoder https://download.thimeo.com/MicroMPX_Decoder_ARM64
 chmod +x /opt/micrompx/MicroMPX_Decoder > /dev/null
 setcap CAP_NET_BIND_SERVICE=+eip /opt/micrompx/MicroMPX_Decoder > /dev/null
 
