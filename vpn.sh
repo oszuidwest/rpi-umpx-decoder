@@ -3,7 +3,11 @@
 # Start with a clean terminal
 clear
 
-curl -f -Ss -o /tmp/functions.sh https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh; then
+# Download the functions library
+if ! curl -f -Ss -o /tmp/functions.sh https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh; then
+  echo -e  "*** Failed to download functions library. Please check your network connection! ***"
+  exit 1
+fi
 
 # Source the functions file
 source /tmp/functions.sh
