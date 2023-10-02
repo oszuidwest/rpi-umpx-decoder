@@ -12,6 +12,6 @@ This repository contains the MicroMPX set-up for [ZuidWest FM](https://www.zuidw
 - If you want monitoring via UptimeRobot, add the contents of `allowlist.txt` to the `Whitelist=` section of hte MicroMPX configuration file which is at `/home/micrompx/.MicroMPX_Decoder.rc`
 
 # How to add the Raspberry Pi to the VPN
-- Download and run the VPN script with the command `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/setup.sh)"`
+- Download and run the VPN script with the command `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/vpn.sh)"`
 - Check with `ip a` if you have an interface named `wg0` with the correct IP
 - If the `wg0` interface is not showing, enable debugging with `modprobe wireguard && echo module wireguard +p > /sys/kernel/debug/dynamic_debug/control` and `tail -f /var/log/syslog` to look for errors
