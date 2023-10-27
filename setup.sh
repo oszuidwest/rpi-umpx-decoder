@@ -89,7 +89,7 @@ systemctl enable micrompx > /dev/null
 
 # Disable only the hdmi audio so we can use the minijack for monitoring
 echo -e "${BLUE}►► Disabling onboard audio...${NC}"
-readonly CONFIG_FILE="/boot/config.txt"
+readonly CONFIG_FILE="/boot/firmware/config.txt"
 sed -i '/dtoverlay=vc4-fkms-v3d/ { /audio=off/! s/$/,audio=off/ }' "$CONFIG_FILE" > /dev/null
 sed -i '/dtoverlay=vc4-kms-v3d/ { /noaudio/! s/$/,noaudio/ }' "$CONFIG_FILE" > /dev/null
 
