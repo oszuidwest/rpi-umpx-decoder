@@ -15,3 +15,6 @@ This repository contains the MicroMPX set-up for [ZuidWest FM](https://www.zuidw
 - Download and run the VPN script with the command `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/vpn.sh)"`
 - Check with `ip a` if you have an interface named `wg0` with the correct IP
 - If the `wg0` interface is not showing, enable debugging with `modprobe wireguard && echo module wireguard +p > /sys/kernel/debug/dynamic_debug/control` and `tail -f /var/log/syslog` to look for errors
+
+## Optional heartbeat monitoring
+You can optionally integrate heartbeat monitoring. In this case the Pi will `wget --spider` a given url every minute, acting as a heartbeat. This can be any url, but we tested with Uptime Robot. A paid account is required at Uptime Robot for heartbeat monitoring.
