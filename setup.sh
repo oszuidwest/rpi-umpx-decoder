@@ -23,7 +23,7 @@ is_this_linux
 is_this_os_64bit
 
 # Check if we are running on a Raspberry Pi 3 or newer
-check_rpi_model 3
+check_rpi_model 4
 
 # Something fancy for the sysadmin
 cat << "EOF"
@@ -37,6 +37,12 @@ EOF
 
 # Hi!
 echo -e "${GREEN}⎎ MicroMPX Setup for Raspberry Pi${NC}\n\n"
+
+# Ask about monitoring
+ask_user "ENABLE_HEARTBEAT" "n" "Do you want to integrate heartbeat monitoring via UptimeRobot (y/n)" "y/n"
+if [ "$ENABLE_HEARTBEAT" == "y" ]; then
+  ask_user "HEARTBEAT_URL" "https://heartbeat.uptimerobot.com/xxx" "Enter the URL to get every minute for heartbeat monitoring" "str"
+fi
 
 # Check and stop micrompx service if running
 echo -e "${BLUE}►► Checking and stopping MicroMPX service if running...${NC}"
