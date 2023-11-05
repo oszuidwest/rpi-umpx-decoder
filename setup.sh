@@ -94,7 +94,7 @@ if [ "$ENABLE_HEARTBEAT" == "y" ]; then
 
   # Add a cronjob that calls the HEARTBEAT_URL every minute
   echo -e "${BLUE}►► Setting up heartbeat monitoring cronjob...${NC}"
-  (crontab -l 2>/dev/null; echo "* * * * * /usr/bin/wget --spider $HEARTBEAT_URL > /dev/null 2>&1") | crontab -
+  (crontab -l 2>/dev/null; echo "* * * * * wget --spider $HEARTBEAT_URL > /dev/null 2>&1") | crontab -
   echo -e "${GREEN}Heartbeat monitoring cronjob added.${NC}"
 fi
 
