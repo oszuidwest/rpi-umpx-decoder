@@ -22,7 +22,7 @@ are_we_root
 is_this_linux
 is_this_os_64bit
 
-# Check if we are running on a Raspberry Pi 3 or newer
+# Check if we are running on a Raspberry Pi 4 or newer
 check_rpi_model 4
 
 # Something fancy for the sysadmin
