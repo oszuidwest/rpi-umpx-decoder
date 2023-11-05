@@ -38,12 +38,6 @@ EOF
 # Hi!
 echo -e "${GREEN}⎎ MicroMPX Setup for Raspberry Pi${NC}\n\n"
 
-# Ask about monitoring
-ask_user "ENABLE_HEARTBEAT" "n" "Do you want to integrate heartbeat monitoring via UptimeRobot (y/n)" "y/n"
-if [ "$ENABLE_HEARTBEAT" == "y" ]; then
-  ask_user "HEARTBEAT_URL" "https://heartbeat.uptimerobot.com/xxx" "Enter the URL to get every minute for heartbeat monitoring" "str"
-fi
-
 # Check and stop micrompx service if running
 echo -e "${BLUE}►► Checking and stopping MicroMPX service if running...${NC}"
 if systemctl is-active --quiet micrompx > /dev/null; then
@@ -92,6 +86,17 @@ rm -f /etc/systemd/system/micrompx.service > /dev/null
 curl -s -o /etc/systemd/system/micrompx.service https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/micrompx.service
 systemctl daemon-reload > /dev/null
 systemctl enable micrompx > /dev/null
+
+# Heartbeat monitoring
+ask_user "ENABLE_HEARTBEAT" "n" "Do you want to integrate heartbeat monitoring via UptimeRobot (y/n)" "y/n"
+if [ "$ENABLE_HEARTBEAT" == "y" ]; then
+  ask_user "HEARTBEAT_URL" "https://heartbeat.uptimerobot.com/xxx" "Enter the URL to get every minute for heartbeat monitoring" "str"
+
+  # Add a cronjob that calls the HEARTBEAT_URL every minute
+  echo -e "${BLUE}►► Setting up heartbeat monitoring cronjob...${NC}"
+  (crontab -l 2>/dev/null; echo "* * * * * /usr/bin/wget --spider $HEARTBEAT_URL > /dev/null 2>&1") | crontab -
+  echo -e "${GREEN}Heartbeat monitoring cronjob added.${NC}"
+fi
 
 # Disable only the hdmi audio so we can use the minijack for monitoring
 echo -e "${BLUE}►► Disabling onboard audio...${NC}"
