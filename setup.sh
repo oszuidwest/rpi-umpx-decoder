@@ -23,7 +23,7 @@ is_this_linux
 is_this_os_64bit
 
 # Check if we are running on a Raspberry Pi 3 or newer
-check_rpi_model 3
+check_rpi_model 4
 
 # Something fancy for the sysadmin
 cat << "EOF"
@@ -86,6 +86,17 @@ rm -f /etc/systemd/system/micrompx.service > /dev/null
 curl -s -o /etc/systemd/system/micrompx.service https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/micrompx.service
 systemctl daemon-reload > /dev/null
 systemctl enable micrompx > /dev/null
+
+# Heartbeat monitoring
+ask_user "ENABLE_HEARTBEAT" "n" "Do you want to integrate heartbeat monitoring via UptimeRobot (y/n)" "y/n"
+if [ "$ENABLE_HEARTBEAT" == "y" ]; then
+  ask_user "HEARTBEAT_URL" "https://heartbeat.uptimerobot.com/xxx" "Enter the URL to get every minute for heartbeat monitoring" "str"
+
+  # Add a cronjob that calls the HEARTBEAT_URL every minute
+  echo -e "${BLUE}►► Setting up heartbeat monitoring cronjob...${NC}"
+  (crontab -l 2>/dev/null; echo "* * * * * wget --spider $HEARTBEAT_URL > /dev/null 2>&1") | crontab -
+  echo -e "${GREEN}Heartbeat monitoring cronjob added.${NC}"
+fi
 
 # Disable only the hdmi audio so we can use the minijack for monitoring
 echo -e "${BLUE}►► Disabling onboard audio...${NC}"
