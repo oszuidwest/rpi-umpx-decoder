@@ -22,8 +22,18 @@ are_we_root
 is_this_linux
 is_this_os_64bit
 
-# Check if we are running on a Raspberry Pi 4 or newer
-check_rpi_model 4
+# Check if we are running on a Raspberry Pi 3 or newer
+check_rpi_model 3
+
+# Determine the correct config file path
+if [ -f /boot/firmware/config.txt ]; then
+  CONFIG_FILE=/boot/firmware/config.txt
+elif [ -f /boot/config.txt ]; then
+  CONFIG_FILE=/boot/config.txt
+else
+  echo -e "${RED}Error: config.txt not found in known locations.${NC}"
+  exit 1
+fi
 
 # Something fancy for the sysadmin
 cat << "EOF"
@@ -46,10 +56,6 @@ else
   echo -e "${YELLOW}MicroMPX service is not running. This it either a fresh install or the stop succeeded.${NC}"
 fi
 
-# Expand filesystem
-echo -e "${BLUE}►► Expanding filesystem...${NC}"
-raspi-config --expand-rootfs > /dev/null
-
 # Timezone configuration
 set_timezone Europe/Amsterdam
 
@@ -64,10 +70,10 @@ fi
 
 echo -e "${BLUE}►► Checking if the user 'micrompx' is a member of the 'audio' group${NC}"
 if groups micrompx | grep -q '\baudio\b' > /dev/null; then
-    echo -e "${YELLOW}User 'micrompx' is already a member of the 'audio' group. Not doing anything.${NC}"
+  echo -e "${YELLOW}User 'micrompx' is already a member of the 'audio' group. Not doing anything.${NC}"
 else
-    echo -e "${YELLOW}User 'micrompx' is not a member of the 'audio' group. Adding them to the group now...${NC}"
-    usermod -aG audio micrompx > /dev/null
+  echo -e "${YELLOW}User 'micrompx' is not a member of the 'audio' group. Adding them to the group now...${NC}"
+  usermod -aG audio micrompx > /dev/null
 fi
 
 # Install dependencies for micrompx
@@ -91,7 +97,6 @@ systemctl enable micrompx > /dev/null
 ask_user "ENABLE_HEARTBEAT" "n" "Do you want to integrate heartbeat monitoring via UptimeRobot (y/n)" "y/n"
 if [ "$ENABLE_HEARTBEAT" == "y" ]; then
   ask_user "HEARTBEAT_URL" "https://heartbeat.uptimerobot.com/xxx" "Enter the URL to get every minute for heartbeat monitoring" "str"
-
   # Add a cronjob that calls the HEARTBEAT_URL every minute
   echo -e "${BLUE}►► Setting up heartbeat monitoring cronjob...${NC}"
   (crontab -l 2>/dev/null; echo "* * * * * wget --spider $HEARTBEAT_URL > /dev/null 2>&1") | crontab -
@@ -100,7 +105,6 @@ fi
 
 # Disable only the hdmi audio so we can use the minijack for monitoring
 echo -e "${BLUE}►► Disabling onboard audio...${NC}"
-readonly CONFIG_FILE="/boot/firmware/config.txt"
 sed -i '/dtoverlay=vc4-fkms-v3d/ { /audio=off/! s/$/,audio=off/ }' "$CONFIG_FILE" > /dev/null
 sed -i '/dtoverlay=vc4-kms-v3d/ { /noaudio/! s/$/,noaudio/ }' "$CONFIG_FILE" > /dev/null
 
@@ -114,28 +118,26 @@ echo -e "4. DAC+ ADC"
 echo -e "5. DAC+ ADC PRO"
 echo -e "6. DIGI+"
 echo -e "7. DIGI+ PRO"
-
 read -r device_number
 case $device_number in
-    1) overlay="hifiberry-dac" ;;
-    2) overlay="hifiberry-dacplus" ;;
-    3) overlay="hifiberry-dacplushd" ;;
-    4) overlay="hifiberry-dacplusadc" ;;
-    5) overlay="hifiberry-dacplusadcpro" ;;
-    6) overlay="hifiberry-digi" ;;
-    7) overlay="hifiberry-digi-pro" ;;
-    *) echo -e "${RED}Invalid input, exiting.${NC}"; exit 1 ;;
+  1) overlay="hifiberry-dac" ;;
+  2) overlay="hifiberry-dacplus" ;;
+  3) overlay="hifiberry-dacplushd" ;;
+  4) overlay="hifiberry-dacplusadc" ;;
+  5) overlay="hifiberry-dacplusadcpro" ;;
+  6) overlay="hifiberry-digi" ;;
+  7) overlay="hifiberry-digi-pro" ;;
+  *) echo -e "${RED}Invalid input, exiting.${NC}"; exit 1 ;;
 esac
-
-if ! grep -q "dtoverlay=$overlay" $CONFIG_FILE > /dev/null; then
-    echo -e "dtoverlay=$overlay" >> $CONFIG_FILE
+if ! grep -q "dtoverlay=$overlay" "$CONFIG_FILE" > /dev/null; then
+  echo -e "dtoverlay=$overlay" >> "$CONFIG_FILE"
 fi
 
-# Apply HifiBerry kernel fix is needed
+# Apply HifiBerry kernel fix if needed
 echo -e "${BLUE}►► Checking Linux version and disabling onboard EEPROM if necessary...${NC}"
 kernel_version=$(uname -r | awk -F. '{print $1 "." $2}')
 if [ "$(printf '%s\n' "5.4" "$kernel_version" | sort -V | head -n1)" = "5.4" ] && [ "$kernel_version" != "5.4" ]; then
-    grep -q 'force_eeprom_read=0' $CONFIG_FILE || echo -e "force_eeprom_read=0" >> $CONFIG_FILE
+  grep -q 'force_eeprom_read=0' "$CONFIG_FILE" || echo -e "force_eeprom_read=0" >> "$CONFIG_FILE"
 fi
 
 # Reboot
