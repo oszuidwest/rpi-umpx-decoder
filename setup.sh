@@ -35,6 +35,9 @@ else
   exit 1
 fi
 
+# Determine the first IP address
+FIRST_IP=$(hostname -I | awk '{print $1}')
+
 # Something fancy for the sysadmin
 cat << "EOF"
  ______     _     ___          __       _     ______ __  __ 
@@ -142,5 +145,6 @@ fi
 
 # Reboot
 echo -e "\n\n${GREEN}✓ Setup is complete! Your Raspberry Pi will reboot in 10 seconds.${NC}"
+echo -e "Access the MicroMPX interface at http://${IP}:8080 after the reboot."
 sleep 10
 reboot
