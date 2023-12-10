@@ -6,10 +6,10 @@ This repository contains the MicroMPX set-up for [ZuidWest FM](https://www.zuidw
 - Install Raspberry Pi OS Lite 12 (Bookworm) or 11 (Bullseye) 64-bit
 - Ensure you are root by running `sudo su`
 - Download and run the install script with the command `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/setup.sh)"`
-
-# How to configure MicroMPX
 - After a reboot MicroMPX should be running on `http://{{ip}}:8080`
-- If you want monitoring via UptimeRobot, add the contents of `allowlist.txt` to the `Whitelist=` section of hte MicroMPX configuration file which is at `/home/micrompx/.MicroMPX_Decoder.rc`
+
+## A few words about the Raspberry Pi 5
+MicroMPX and HiFiBerry boards work well with the Raspberry Pi 5. There is currently [a bug](https://github.com/raspberrypi/linux/issues/5743) in the firmware that requires you to edit the `/boot/firwmare/config.txt` manually. Add `,slave` after the `dtoverlay` for the HiFiBerry. For example `dtoverlay=hifiberry-dacplus,slave`.
 
 # How to add the Raspberry Pi to the VPN
 - Download and run the VPN script with the command `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/vpn.sh)"`
