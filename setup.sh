@@ -56,7 +56,7 @@ echo -e "${BLUE}►► Checking and stopping MicroMPX service if running...${NC}
 if systemctl is-active --quiet micrompx > /dev/null; then
   systemctl stop micrompx > /dev/null || { echo -e "${RED}Failed to stop the MicroMPX service. Please check the logs for more details.${NC}"; exit 1; }
 else
-  echo -e "${YELLOW}MicroMPX service is not running. This it either a fresh install or the stop succeeded.${NC}"
+  echo -e "${YELLOW}MicroMPX service is not running. Assuming this is a fresh install.${NC}"
 fi
 
 # Timezone configuration
@@ -145,6 +145,6 @@ fi
 
 # Reboot
 echo -e "\n\n${GREEN}✓ Setup is complete! Your Raspberry Pi will reboot in 10 seconds.${NC}"
-echo -e "Access the MicroMPX interface at http://${IP}:8080 after the reboot."
+echo -e "Access the MicroMPX interface at http://${FIRST_IP}:8080 after the reboot."
 sleep 10
 reboot
