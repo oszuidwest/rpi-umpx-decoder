@@ -18,3 +18,8 @@ MicroMPX and HiFiBerry boards work well with the Raspberry Pi 5. There is curren
 
 ## Optional heartbeat monitoring
 You can optionally integrate heartbeat monitoring. In this case the Pi will `wget --spider` a given url every minute, acting as a heartbeat. This can be any url, but we tested with Uptime Robot. A paid account is required at Uptime Robot for heartbeat monitoring.
+
+# License
+This project is licensed under the GPLv3 License - see the LICENSE.md file for details. 
+
+Bugs, feedback, and ideas are welcome at `techniek@zuidwesttv.nl` or through pull requests.
