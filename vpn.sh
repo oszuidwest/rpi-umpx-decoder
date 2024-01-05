@@ -65,7 +65,7 @@ fi
 # Create the WireGuard configuration file
 cat >"$CONFIGURATION_PATH" <<EOL
 [Interface]
-Address = $RASPBERRY_ADDRESS
+Address = $RASPBERRY_ADDRESS/32
 PrivateKey = $GENERATED_PRIVATE_KEY
 
 [Peer]
