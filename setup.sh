@@ -97,7 +97,7 @@ curl -s -o /etc/systemd/system/micrompx.service https://raw.githubusercontent.co
 systemctl daemon-reload > /dev/null
 systemctl enable micrompx > /dev/null
 
-# Add ramdrive
+# Add RAM disk
 echo -e "${BLUE}►► Setting up RAM disk for logs...${NC}"
 rm -f /etc/systemd/system/ramdisk.service > /dev/null
 curl -s -o /etc/systemd/system/ramdisk.service https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/ramdrive/ramdisk.service
