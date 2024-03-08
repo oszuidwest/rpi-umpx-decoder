@@ -52,7 +52,7 @@ EOF
 # Hi!
 echo -e "${GREEN}⎎ MicroMPX Setup for Raspberry Pi${NC}\n\n"
 
-# Check and stop micrompx service if running
+# Check and stop MicroMPX service if running
 echo -e "${BLUE}►► Checking and stopping MicroMPX service if running...${NC}"
 if systemctl is-active --quiet micrompx > /dev/null; then
   systemctl stop micrompx > /dev/null || { echo -e "${RED}Failed to stop the MicroMPX service. Please check the logs for more details.${NC}"; exit 1; }
@@ -80,10 +80,10 @@ else
   usermod -aG audio micrompx > /dev/null
 fi
 
-# Install dependencies for micrompx
+# Install dependencies for MicroMPX
 install_packages silent libasound2 libsndfile1
 
-# Download micrompx from Thimeo
+# Download MicroMPX from Thimeo
 echo -e "${BLUE}►► Downloading and installing MicroMPX...${NC}"
 mkdir -p /opt/micrompx > /dev/null
 curl -s -o /opt/micrompx/MicroMPX_Decoder https://download.thimeo.com/MicroMPX_Decoder_ARM64
