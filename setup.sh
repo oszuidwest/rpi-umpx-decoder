@@ -104,6 +104,14 @@ curl -s -o /etc/systemd/system/ramdisk.service https://raw.githubusercontent.com
 systemctl daemon-reload > /dev/null
 systemctl enable ramdrive > /dev/null
 
+# Put MicroMPX logs on RAM disk
+if [ -d "/home/micrompx/.MicroMPX_Decoder.log" ]; then
+    echo -e "Directory /home/micrompx/.MicroMPX_Decoder.log exists. Removed if before creating the symlink."
+    rm -rf "/home/micrompx/.MicroMPX_Decoder.log"
+fi
+ln -s /mnt/ramdisk /home/micrompx/.MicroMPX_Decoder.log
+chown -R micrompx:micrompx /mnt/ramdisk
+
 # Heartbeat monitoring
 ask_user "ENABLE_HEARTBEAT" "n" "Do you want to integrate heartbeat monitoring via UptimeRobot (y/n)" "y/n"
 if [ "$ENABLE_HEARTBEAT" == "y" ]; then
