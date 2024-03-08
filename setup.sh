@@ -23,8 +23,8 @@ are_we_root
 is_this_linux
 is_this_os_64bit
 
-# Check if we are running on a Raspberry Pi 3 or newer
-check_rpi_model 3
+# Check if we are running on a Raspberry Pi 4 or newer
+check_rpi_model 4
 
 # Determine the correct config file path
 if [ -f /boot/firmware/config.txt ]; then
@@ -52,7 +52,7 @@ EOF
 # Hi!
 echo -e "${GREEN}⎎ MicroMPX Setup for Raspberry Pi${NC}\n\n"
 
-# Check and stop micrompx service if running
+# Check and stop MicroMPX service if running
 echo -e "${BLUE}►► Checking and stopping MicroMPX service if running...${NC}"
 if systemctl is-active --quiet micrompx > /dev/null; then
   systemctl stop micrompx > /dev/null || { echo -e "${RED}Failed to stop the MicroMPX service. Please check the logs for more details.${NC}"; exit 1; }
@@ -80,10 +80,10 @@ else
   usermod -aG audio micrompx > /dev/null
 fi
 
-# Install dependencies for micrompx
+# Install dependencies for MicroMPX
 install_packages silent libasound2 libsndfile1
 
-# Download micrompx from Thimeo
+# Download MicroMPX from Thimeo
 echo -e "${BLUE}►► Downloading and installing MicroMPX...${NC}"
 mkdir -p /opt/micrompx > /dev/null
 curl -s -o /opt/micrompx/MicroMPX_Decoder https://download.thimeo.com/MicroMPX_Decoder_ARM64
@@ -96,6 +96,23 @@ rm -f /etc/systemd/system/micrompx.service > /dev/null
 curl -s -o /etc/systemd/system/micrompx.service https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/micrompx.service
 systemctl daemon-reload > /dev/null
 systemctl enable micrompx > /dev/null
+
+# Add RAM disk
+echo -e "${BLUE}►► Setting up RAM disk for logs...${NC}"
+rm -f /etc/systemd/system/ramdisk.service > /dev/null
+curl -s -o /etc/systemd/system/ramdisk.service https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/ramdrive/ramdisk.service
+systemctl daemon-reload > /dev/null
+systemctl enable ramdisk > /dev/null
+systemctl start ramdisk
+
+# Put MicroMPX logs on RAM disk
+echo -e "${BLUE}►► Putting MicroMPX logs on the RAM disk...${NC}"
+if [ -d "/home/micrompx/.MicroMPX_Decoder.log" ]; then
+  echo -e "${YELLOW}Log directory exists. Removed if before creating the symlink.${NC}"
+  rm -rf /home/micrompx/.MicroMPX_Decoder.log
+fi
+ln -s /mnt/ramdisk /home/micrompx/.MicroMPX_Decoder.log
+chown -R micrompx:micrompx /mnt/ramdisk
 
 # Heartbeat monitoring
 ask_user "ENABLE_HEARTBEAT" "n" "Do you want to integrate heartbeat monitoring via UptimeRobot (y/n)" "y/n"
