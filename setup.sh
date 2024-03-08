@@ -106,6 +106,7 @@ systemctl enable ramdisk > /dev/null
 systemctl start ramdisk
 
 # Put MicroMPX logs on RAM disk
+echo -e "${BLUE}►► Putting MicroMPX logs on the RAM disk...${NC}"
 if [ -d "/home/micrompx/.MicroMPX_Decoder.log" ]; then
   echo -e "${YELLOW}Log directory exists. Removed if before creating the symlink.${NC}"
   rm -rf /home/micrompx/.MicroMPX_Decoder.log
