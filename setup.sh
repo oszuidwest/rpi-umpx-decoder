@@ -81,7 +81,7 @@ else
 fi
 
 # Install dependencies for micrompx
-install_packages silent libasound2
+install_packages silent libasound2 libsndfile1
 
 # Download micrompx from Thimeo
 echo -e "${BLUE}►► Downloading and installing MicroMPX...${NC}"
