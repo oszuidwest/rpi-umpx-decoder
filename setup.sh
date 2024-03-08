@@ -107,8 +107,8 @@ systemctl start ramdisk
 
 # Put MicroMPX logs on RAM disk
 if [ -d "/home/micrompx/.MicroMPX_Decoder.log" ]; then
-    echo -e "Directory /home/micrompx/.MicroMPX_Decoder.log exists. Removed if before creating the symlink."
-    rm -rf /home/micrompx/.MicroMPX_Decoder.log
+  echo -e "Directory /home/micrompx/.MicroMPX_Decoder.log exists. Removed if before creating the symlink."
+  rm -rf /home/micrompx/.MicroMPX_Decoder.log
 fi
 ln -s /mnt/ramdisk /home/micrompx/.MicroMPX_Decoder.log
 chown -R micrompx:micrompx /mnt/ramdisk
