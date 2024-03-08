@@ -102,7 +102,7 @@ echo -e "${BLUE}►► Setting up RAM disk for logs...${NC}"
 rm -f /etc/systemd/system/ramdisk.service > /dev/null
 curl -s -o /etc/systemd/system/ramdisk.service https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/ramdrive/ramdisk.service
 systemctl daemon-reload > /dev/null
-systemctl enable ramdrive > /dev/null
+systemctl enable ramdisk > /dev/null
 
 # Put MicroMPX logs on RAM disk
 if [ -d "/home/micrompx/.MicroMPX_Decoder.log" ]; then
