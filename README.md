@@ -28,4 +28,4 @@ This script introduces several modifications to the default MicroMPX behavior, w
 # License
 This project is licensed under the GPLv3 License - see the LICENSE.md file for details.
 
-For bugs, feedback, and ideas, please contact us at `techniek@zuidwesttv.nl` or via pull requests.
+For bugs, feedback, and ideas, please contact us at `techniek@zuidwesttv.nl` or file a pull request with your idea.
