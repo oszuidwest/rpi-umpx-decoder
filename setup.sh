@@ -1,34 +1,37 @@
 #!/usr/bin/env bash
 
-# Define paths and URLs
-FUNCTIONS_SH_PATH="/tmp/functions.sh"
-FUNCTIONS_SH_URL="https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh"
+# Set-up the functions library
+FUNCTIONS_LIB_PATH="/tmp/functions.sh"
+FUNCTIONS_LIB_URL="https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh"
 
+# Set-up MicroMPX
 MICROMPX_DECODER_PATH="/opt/micrompx/MicroMPX_Decoder"
 MICROMPX_DECODER_URL="https://download.thimeo.com/MicroMPX_Decoder_ARM64"
 MICROMPX_SERVICE_PATH="/etc/systemd/system/micrompx.service"
 MICROMPX_SERVICE_URL="https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/micrompx.service"
-LOG_DIR="/home/micrompx/.MicroMPX_Decoder.log" # Log directory
+MICROMPX_LOG_DIR="/home/micrompx/.MicroMPX_Decoder.log"
 
+# Set-up RAM Disk
 RAMDISK_SERVICE_PATH="/etc/systemd/system/ramdisk.service"
 RAMDISK_SERVICE_URL="https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/ramdisk.service"
-RAMDISK_PATH="/mnt/ramdisk" # RAM disk path
+RAMDISK_PATH="/mnt/ramdisk"
 
-CONFIG_FILE_PATHS=("/boot/firmware/config.txt" "/boot/config.txt") # Config file paths
-FIRST_IP=$(hostname -I | awk '{print $1}') # Determine the first IP address upfront
+# General Raspberry Pi configuration
+CONFIG_FILE_PATHS=("/boot/firmware/config.txt" "/boot/config.txt")
+FIRST_IP=$(hostname -I | awk '{print $1}')
 
 # Start with a clean terminal
 clear
 
 # Remove old functions library and download the latest version
-rm -f "$FUNCTIONS_SH_PATH"
-if ! curl -s -o "$FUNCTIONS_SH_PATH" "$FUNCTIONS_SH_URL"; then
+rm -f "$FUNCTIONS_LIB_PATH"
+if ! curl -s -o "$FUNCTIONS_LIB_PATH" "$FUNCTIONS_LIB_URL"; then
   echo -e "*** Failed to download functions library. Please check your network connection! ***"
   exit 1
 fi
 
 # Source the functions file
-source "$FUNCTIONS_SH_PATH"
+source "$FUNCTIONS_LIB_PATH"
 
 # Set color variables
 set_colors
@@ -129,15 +132,15 @@ systemctl start ramdisk
 
 # Put MicroMPX logs on RAM disk
 echo -e "${BLUE}►► Putting MicroMPX logs on the RAM disk...${NC}"
-if [ -d "$LOG_DIR" ]; then
+if [ -d "$MICROMPX_LOG_DIR" ]; then
   echo -e "${YELLOW}Log directory exists. Removing it before creating the symlink.${NC}"
-  rm -rf "$LOG_DIR"
+  rm -rf "$MICROMPX_LOG_DIR"
 fi
-ln -s "$RAMDISK_PATH" "$LOG_DIR"
+ln -s "$RAMDISK_PATH" "$MICROMPX_LOG_DIR"
 chown -R micrompx:micrompx "$RAMDISK_PATH"
 
 # Clean logs every 7 days to save space on the RAM disk (MicroMPX does this every 30 days)
-LOGS_CRONJOB="0 0 * * * find -L $LOG_DIR -type f -mtime +7 -exec rm {} \;"
+LOGS_CRONJOB="0 0 * * * find -L $MICROMPX_LOG_DIR -type f -mtime +7 -exec rm {} \;"
 echo -e "${BLUE}►► Setting up log file deletion cronjob...${NC}"
 if ! crontab -l | grep -F -- "$LOGS_CRONJOB" > /dev/null; then
   (crontab -l 2>/dev/null; echo "$LOGS_CRONJOB") | crontab -
