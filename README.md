@@ -16,7 +16,7 @@ MicroMPX and HiFiBerry boards are compatible with the Raspberry Pi 5. Currently,
 - If the `wg0` interface does not appear, enable debugging with `modprobe wireguard && echo module wireguard +p > /sys/kernel/debug/dynamic_debug/control` and use `tail -f /var/log/syslog` to identify any errors.
 
 ## Optional Heartbeat Monitoring
-Optionally, heartbeat monitoring can be integrated. In this configuration, the Pi will execute `wget --spider` on a specified URL every minute to serve as a heartbeat. This URL can be any, but testing was conducted with [Uptime Robot](https://uptimerobot.com/?rid=6f699dbd539740). Note that a paid Uptime Robot account is required for heartbeat monitoring.
+Optionally, heartbeat monitoring can be integrated. In this configuration, the Pi will execute `wget --spider` on a specified URL every minute to serve as a heartbeat. This can be any URL, but testing was conducted with [Uptime Robot](https://uptimerobot.com/?rid=6f699dbd539740). Note that a paid Uptime Robot account is required for heartbeat monitoring.
 
 # Opinionated Modifications
 This script introduces several modifications to the default MicroMPX behavior, which we believe enhance the setup:
