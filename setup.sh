@@ -106,8 +106,8 @@ else
   usermod -aG audio micrompx > /dev/null
 fi
 
-# Install dependencies for MicroMPX
-install_packages silent libasound2 libsndfile1
+# Install dependencies
+install_packages silent libasound2 libsndfile1 wget
 
 # Download MicroMPX from Thimeo
 echo -e "${BLUE}►► Downloading and installing MicroMPX...${NC}"
