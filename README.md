@@ -26,6 +26,6 @@ This script introduces several modifications to the default MicroMPX behavior, w
 3. The HDMI audio output is disabled, allowing the analog output to be used for signal monitoring. Therefore, we recommend using a Raspberry Pi 4, as it still offers an analog output.
 
 # License
-This project is licensed under the GPLv3 License - see the LICENSE.md file for details.
+This project is licensed under the GPLv3 License - see the LICENSE file for details.
 
 For bugs, feedback, and ideas, please contact us at `techniek@zuidwesttv.nl` or file a pull request with your idea.
