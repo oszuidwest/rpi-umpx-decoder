@@ -11,7 +11,7 @@ MICROMPX_SERVICE_PATH="/etc/systemd/system/micrompx.service"
 MICROMPX_SERVICE_URL="https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/logcleaner/micrompx.service"
 MICROMPX_LOG_DIR="/home/micrompx/.MicroMPX_Decoder.log"
 
-# Set-up RAM Disk
+# Set-up RAM disk
 RAMDISK_SERVICE_PATH="/etc/systemd/system/ramdisk.service"
 RAMDISK_SERVICE_URL="https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/logcleaner/ramdisk.service"
 RAMDISK_PATH="/mnt/ramdisk"
