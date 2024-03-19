@@ -4,7 +4,7 @@ This repository contains the MicroMPX setup for [ZuidWest FM](https://www.zuidwe
 # How to Prepare the Raspberry Pi
 - Install Raspberry Pi OS Lite 12 (Bookworm).
 - Ensure you are root by executing `sudo su`.
-- Download and execute the installation script with the command: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/logcleaner/setup.sh)"`.
+- Download and execute the installation script with the command: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/setup.sh)"`.
 - After rebooting, MicroMPX should be accessible at `http://{{ip}}:8080`.
 
 ## A Few Words About the Raspberry Pi 5
