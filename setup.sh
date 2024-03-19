@@ -1,17 +1,38 @@
 #!/usr/bin/env bash
 
+# Set-up the functions library
+FUNCTIONS_LIB_PATH="/tmp/functions.sh"
+FUNCTIONS_LIB_URL="https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh"
+
+# Set-up MicroMPX
+MICROMPX_DECODER_PATH="/opt/micrompx/MicroMPX_Decoder"
+MICROMPX_DECODER_URL="https://download.thimeo.com/MicroMPX_Decoder_ARM64"
+MICROMPX_SERVICE_PATH="/etc/systemd/system/micrompx.service"
+MICROMPX_SERVICE_URL="https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/logcleaner/micrompx.service"
+MICROMPX_LOG_DIR="/home/micrompx/.MicroMPX_Decoder.log"
+
+# Set-up RAM disk
+RAMDISK_SERVICE_PATH="/etc/systemd/system/ramdisk.service"
+RAMDISK_SERVICE_URL="https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/logcleaner/ramdisk.service"
+RAMDISK_PATH="/mnt/ramdisk"
+
+# General Raspberry Pi configuration
+CONFIG_FILE_PATHS=("/boot/firmware/config.txt" "/boot/config.txt")
+FIRST_IP=$(hostname -I | awk '{print $1}')
+
 # Start with a clean terminal
 clear
 
-# Remove old functions libraries and download the latest version
-rm -f /tmp/functions.sh
-if ! curl -s -o /tmp/functions.sh https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh; then
+# Remove old functions library and download the latest version
+rm -f "$FUNCTIONS_LIB_PATH"
+if ! curl -s -o "$FUNCTIONS_LIB_PATH" "$FUNCTIONS_LIB_URL"; then
   echo -e "*** Failed to download functions library. Please check your network connection! ***"
   exit 1
 fi
 
 # Source the functions file
-source /tmp/functions.sh
+# shellcheck source=/tmp/functions.sh
+source "$FUNCTIONS_LIB_PATH"
 
 # Set color variables
 set_colors
@@ -27,19 +48,20 @@ is_this_os_64bit
 check_rpi_model 4
 
 # Determine the correct config file path
-if [ -f /boot/firmware/config.txt ]; then
-  CONFIG_FILE=/boot/firmware/config.txt
-elif [ -f /boot/config.txt ]; then
-  CONFIG_FILE=/boot/config.txt
-else
+CONFIG_FILE=""
+for path in "${CONFIG_FILE_PATHS[@]}"; do
+  if [ -f "$path" ]; then
+    CONFIG_FILE="$path"
+    break
+  fi
+done
+
+if [ -z "$CONFIG_FILE" ]; then
   echo -e "${RED}Error: config.txt not found in known locations.${NC}"
   exit 1
 fi
 
-# Determine the first IP address
-FIRST_IP=$(hostname -I | awk '{print $1}')
-
-# Something fancy for the sysadmin
+# Banner
 cat << "EOF"
  ______     _     ___          __       _     ______ __  __ 
 |___  /    (_)   | \ \        / /      | |   |  ____|  \/  |
@@ -49,8 +71,12 @@ cat << "EOF"
 /_____\__,_|_|\__,_|   \/  \/ \___||___/\__| |_|    |_|  |_|
 EOF
 
-# Hi!
+# Greeting
 echo -e "${GREEN}⎎ MicroMPX Setup for Raspberry Pi${NC}\n\n"
+ask_user "ENABLE_HEARTBEAT" "n" "Do you want to integrate heartbeat monitoring via UptimeRobot (y/n)" "y/n"
+if [ "$ENABLE_HEARTBEAT" == "y" ]; then
+  ask_user "HEARTBEAT_URL" "https://heartbeat.uptimerobot.com/xxx" "Enter the URL to get every minute for heartbeat monitoring" "str"
+fi
 
 # Check and stop MicroMPX service if running
 echo -e "${BLUE}►► Checking and stopping MicroMPX service if running...${NC}"
@@ -80,51 +106,67 @@ else
   usermod -aG audio micrompx > /dev/null
 fi
 
-# Install dependencies for MicroMPX
-install_packages silent libasound2 libsndfile1
+# Install dependencies
+install_packages silent libasound2 libsndfile1 wget
 
 # Download MicroMPX from Thimeo
 echo -e "${BLUE}►► Downloading and installing MicroMPX...${NC}"
 mkdir -p /opt/micrompx > /dev/null
-curl -s -o /opt/micrompx/MicroMPX_Decoder https://download.thimeo.com/MicroMPX_Decoder_ARM64
-chmod +x /opt/micrompx/MicroMPX_Decoder > /dev/null
-setcap CAP_NET_BIND_SERVICE=+eip /opt/micrompx/MicroMPX_Decoder > /dev/null
+curl -s -o "$MICROMPX_DECODER_PATH" "$MICROMPX_DECODER_URL"
+chmod +x "$MICROMPX_DECODER_PATH" > /dev/null
+setcap CAP_NET_BIND_SERVICE=+eip "$MICROMPX_DECODER_PATH" > /dev/null
 
 # Add service
 echo -e "${BLUE}►► Installing MicroMPX service...${NC}"
-rm -f /etc/systemd/system/micrompx.service > /dev/null
-curl -s -o /etc/systemd/system/micrompx.service https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/micrompx.service
+rm -f "$MICROMPX_SERVICE_PATH" > /dev/null
+curl -s -o "$MICROMPX_SERVICE_PATH" "$MICROMPX_SERVICE_URL"
 systemctl daemon-reload > /dev/null
 systemctl enable micrompx > /dev/null
 
 # Add RAM disk
 echo -e "${BLUE}►► Setting up RAM disk for logs...${NC}"
-rm -f /etc/systemd/system/ramdisk.service > /dev/null
-curl -s -o /etc/systemd/system/ramdisk.service https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/ramdisk.service
+rm -f "$RAMDISK_SERVICE_PATH" > /dev/null
+curl -s -o "$RAMDISK_SERVICE_PATH" "$RAMDISK_SERVICE_URL"
 systemctl daemon-reload > /dev/null
 systemctl enable ramdisk > /dev/null
 systemctl start ramdisk
 
 # Put MicroMPX logs on RAM disk
 echo -e "${BLUE}►► Putting MicroMPX logs on the RAM disk...${NC}"
-if [ -d "/home/micrompx/.MicroMPX_Decoder.log" ]; then
-  echo -e "${YELLOW}Log directory exists. Removed if before creating the symlink.${NC}"
-  rm -rf /home/micrompx/.MicroMPX_Decoder.log
+if [ -d "$MICROMPX_LOG_DIR" ]; then
+  echo -e "${YELLOW}Log directory exists. Removing it before creating the symlink.${NC}"
+  rm -rf "$MICROMPX_LOG_DIR"
 fi
-ln -s /mnt/ramdisk /home/micrompx/.MicroMPX_Decoder.log
-chown -R micrompx:micrompx /mnt/ramdisk
+ln -s "$RAMDISK_PATH" "$MICROMPX_LOG_DIR"
+chown -R micrompx:micrompx "$RAMDISK_PATH"
+
+# Clean logs every 7 days to save space on the RAM disk (MicroMPX does this every 30 days)
+LOGS_CRONJOB="0 0 * * * find -L $MICROMPX_LOG_DIR -type f -mtime +7 -exec rm {} \;"
+echo -e "${BLUE}►► Setting up log file deletion cronjob...${NC}"
+# Check if the crontab exists for the current user, create one if not
+if ! crontab -l 2>/dev/null; then
+  echo "No crontab for $(whoami). Creating one..."
+  echo "" | crontab -
+fi
+# Add the new cron job if it does not already exist
+if ! crontab -l | grep -F -- "$LOGS_CRONJOB" > /dev/null; then
+  (crontab -l 2>/dev/null; echo "$LOGS_CRONJOB") | crontab -
+else
+  echo -e "${YELLOW}Log file deletion cronjob already exists. No changes made.${NC}"
+fi
 
 # Heartbeat monitoring
-ask_user "ENABLE_HEARTBEAT" "n" "Do you want to integrate heartbeat monitoring via UptimeRobot (y/n)" "y/n"
 if [ "$ENABLE_HEARTBEAT" == "y" ]; then
-  ask_user "HEARTBEAT_URL" "https://heartbeat.uptimerobot.com/xxx" "Enter the URL to get every minute for heartbeat monitoring" "str"
-  # Add a cronjob that calls the HEARTBEAT_URL every minute
-  echo -e "${BLUE}►► Setting up heartbeat monitoring cronjob...${NC}"
-  (crontab -l 2>/dev/null; echo "* * * * * wget --spider $HEARTBEAT_URL > /dev/null 2>&1") | crontab -
-  echo -e "${GREEN}Heartbeat monitoring cronjob added.${NC}"
+  echo -e "${BLUE}►► Setting up heartbeat monitoring...${NC}"
+  HEARTBEAT_CRONJOB="* * * * * wget --spider $HEARTBEAT_URL > /dev/null 2>&1"
+  if ! crontab -l | grep -F -- "$HEARTBEAT_CRONJOB" > /dev/null; then
+    (crontab -l 2>/dev/null; echo "$HEARTBEAT_CRONJOB") | crontab -
+  else
+    echo -e "${YELLOW}Heartbeat monitoring cronjob already exists. No changes made.${NC}"
+  fi
 fi
 
-# Disable only the hdmi audio so we can use the minijack for monitoring
+# Disable HDMI audio to use the mini-jack for monitoring
 echo -e "${BLUE}►► Disabling onboard audio...${NC}"
 sed -i '/dtoverlay=vc4-fkms-v3d/ { /audio=off/! s/$/,audio=off/ }' "$CONFIG_FILE" > /dev/null
 sed -i '/dtoverlay=vc4-kms-v3d/ { /noaudio/! s/$/,noaudio/ }' "$CONFIG_FILE" > /dev/null
@@ -151,14 +193,14 @@ case $device_number in
   *) echo -e "${RED}Invalid input, exiting.${NC}"; exit 1 ;;
 esac
 if ! grep -q "dtoverlay=$overlay" "$CONFIG_FILE" > /dev/null; then
-  echo -e "dtoverlay=$overlay" >> "$CONFIG_FILE"
+  echo "dtoverlay=$overlay" >> "$CONFIG_FILE"
 fi
 
 # Apply HifiBerry kernel fix if needed
 echo -e "${BLUE}►► Checking Linux version and disabling onboard EEPROM if necessary...${NC}"
 kernel_version=$(uname -r | awk -F. '{print $1 "." $2}')
 if [ "$(printf '%s\n' "5.4" "$kernel_version" | sort -V | head -n1)" = "5.4" ] && [ "$kernel_version" != "5.4" ]; then
-  grep -q 'force_eeprom_read=0' "$CONFIG_FILE" || echo -e "force_eeprom_read=0" >> "$CONFIG_FILE"
+  grep -q 'force_eeprom_read=0' "$CONFIG_FILE" || echo "force_eeprom_read=0" >> "$CONFIG_FILE"
 fi
 
 # Reboot
