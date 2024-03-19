@@ -167,7 +167,7 @@ if [ "$ENABLE_HEARTBEAT" == "y" ]; then
 fi
 
 # Disable HDMI audio to use the mini-jack for monitoring
-echo -e "${BLUE}►► Disabling onboard audio...${NC}"
+echo -e "${BLUE}►► Disabling HDMI audio...${NC}"
 sed -i '/dtoverlay=vc4-fkms-v3d/ { /audio=off/! s/$/,audio=off/ }' "$CONFIG_FILE" > /dev/null
 sed -i '/dtoverlay=vc4-kms-v3d/ { /noaudio/! s/$/,noaudio/ }' "$CONFIG_FILE" > /dev/null
 
