@@ -143,6 +143,12 @@ chown -R micrompx:micrompx "$RAMDISK_PATH"
 # Clean logs every 7 days to save space on the RAM disk (MicroMPX does this every 30 days)
 LOGS_CRONJOB="0 0 * * * find -L $MICROMPX_LOG_DIR -type f -mtime +7 -exec rm {} \;"
 echo -e "${BLUE}►► Setting up log file deletion cronjob...${NC}"
+# Check if the crontab exists for the current user, create one if not
+if ! crontab -l 2>/dev/null; then
+  echo "No crontab for $(whoami). Creating one..."
+  echo "" | crontab -
+fi
+# Add the new cron job if it does not already exist
 if ! crontab -l | grep -F -- "$LOGS_CRONJOB" > /dev/null; then
   (crontab -l 2>/dev/null; echo "$LOGS_CRONJOB") | crontab -
 else
