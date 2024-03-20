@@ -1,5 +1,5 @@
 # rpi-umpx-decoder
-This repository contains the MicroMPX setup for [ZuidWest FM](https://www.zuidwestfm.nl/) in the Netherlands. It is compatible with Raspberry Pi 4 or 5 and uses a [HiFiBerry DAC2 Pro XLR](https://www.hifiberry.com/shop/boards/hifiberry-dac2-pro-xlr/) for audio output. The repository facilitates downloading the latest version of the MicroMPX decoder from Thimeo, which systemd manages as a service.
+This repository contains the MicroMPX setup for [ZuidWest FM](https://www.zuidwestfm.nl/) in the Netherlands. It is compatible with Raspberry Pi 4 or 5 and uses a [HiFiBerry DAC2 Pro XLR](https://www.hifiberry.com/shop/boards/hifiberry-dac2-pro-xlr/) for MPX output. The repository facilitates downloading the latest version of the MicroMPX decoder from Thimeo, which systemd manages as a service.
 
 # How to Prepare the Raspberry Pi
 - Install Raspberry Pi OS Lite 12 (Bookworm).
