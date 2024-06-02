@@ -38,7 +38,7 @@ source "$FUNCTIONS_LIB_PATH"
 set_colors
 
 # Check if running as root
-are_we_root
+check_user_privileges privileged
 
 # Check if this is Linux
 is_this_linux
