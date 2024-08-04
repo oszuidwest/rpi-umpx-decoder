@@ -6,7 +6,7 @@ FUNCTIONS_LIB_URL="https://raw.githubusercontent.com/oszuidwest/bash-functions/m
 
 # Set-up MicroMPX
 MICROMPX_DECODER_PATH="/opt/micrompx/MicroMPX_Decoder"
-MICROMPX_DECODER_URL="https://download.thimeo.com/MicroMPX_Decoder_ARM64"
+MICROMPX_DECODER_URL="https://download.thimeo.com/MicroMPX_Decoder_ARM64_1021"
 MICROMPX_SERVICE_PATH="/etc/systemd/system/micrompx.service"
 MICROMPX_SERVICE_URL="https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/micrompx.service"
 MICROMPX_LOG_DIR="/home/micrompx/.MicroMPX_Decoder.log"
