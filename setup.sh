@@ -11,8 +11,8 @@ FUNCTIONS_LIB_PATH="/tmp/functions.sh"
 FUNCTIONS_LIB_URL="https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh"
 
 # Set-up MicroMPX
+MICROMPX_DEFAULT_VERSION="1021"
 MICROMPX_DECODER_PATH="${INSTALL_DIR}/MicroMPX_Decoder"
-MICROMPX_DECODER_URL="https://download.thimeo.com/MicroMPX_Decoder_ARM64_1021"
 MICROMPX_SERVICE_PATH="/etc/systemd/system/micrompx.service"
 MICROMPX_SERVICE_URL="${REPO_BASE}/micrompx.service"
 
@@ -119,6 +119,7 @@ install_packages silent libasound2 libsndfile1 wget
 
 # Download MicroMPX from Thimeo
 echo -e "${BLUE}►► Downloading and installing MicroMPX...${NC}"
+MICROMPX_DECODER_URL="https://download.thimeo.com/MicroMPX_Decoder_ARM64_${MICROMPX_DEFAULT_VERSION}"
 mkdir -p "$INSTALL_DIR" > /dev/null
 curl -s -o "$MICROMPX_DECODER_PATH" "$MICROMPX_DECODER_URL"
 chmod +x "$MICROMPX_DECODER_PATH" > /dev/null
