@@ -2,7 +2,7 @@
 This repository contains the MicroMPX decoder software for [ZuidWest FM](https://www.zuidwestfm.nl/) and [BredaNu](https://www.bredanu.nl/) in the Netherlands. The setup involves a Raspberry Pi 4 or 5 and a HiFiBerry audio board (DAC, DAC+, DAC2, Digi, etc.) for audio output. The system uses the [Thimeo MicroMPX decoder](https://www.thimeo.com/stereo-tool/micrompx-decoder/), which decodes MicroMPX composite signals for FM radio monitoring and distribution.
 
 # Preparing the Raspberry Pi
-- Install Raspberry Pi OS Lite 12 (Bookworm) 64-bit.
+- Install Raspberry Pi OS Lite 13 (Trixie) 64-bit.
 - Follow the guide at https://www.hifiberry.com/docs/software/configuring-linux-3-18-x/ for HiFiBerry setup.
 - Gain root access with `sudo su`.
 - Download and execute the install script using `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main/install.sh)"`.
