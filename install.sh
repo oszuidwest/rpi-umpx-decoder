@@ -54,7 +54,12 @@ is_this_os_64bit
 
 # Check if we are running on a Raspberry Pi 4 or newer
 check_rpi_model 4
-RPI_MODEL=$(get_rpi_model)
+
+# Extract actual model number for conditional features (e.g., analog audio on Pi 4)
+RPI_MODEL_STRING=$(tr -d '\0' < /proc/device-tree/model)
+if [[ $RPI_MODEL_STRING =~ Raspberry\ Pi\ ([0-9]+) ]]; then
+  RPI_MODEL=${BASH_REMATCH[1]}
+fi
 
 # Determine the correct config file path
 CONFIG_FILE=""
@@ -67,6 +72,15 @@ done
 
 if [ -z "$CONFIG_FILE" ]; then
   echo -e "${RED}Error: config.txt not found in known locations.${NC}"
+  exit 1
+fi
+
+# Check if HiFiBerry is configured BEFORE starting installation
+if ! grep -q "^dtoverlay=hifiberry" "$CONFIG_FILE"; then
+  echo -e "${RED}No HiFiBerry card configured in $CONFIG_FILE${NC}"
+  echo -e "${RED}Please configure your HiFiBerry device before running this script.${NC}"
+  echo -e "${YELLOW}Add the appropriate dtoverlay line to $CONFIG_FILE${NC}"
+  echo -e "${YELLOW}Example: dtoverlay=hifiberry-dacplus${NC}\n"
   exit 1
 fi
 
@@ -87,7 +101,7 @@ ask_user "ENABLE_HEARTBEAT" "n" "Do you want to integrate heartbeat monitoring v
 if [ "$ENABLE_HEARTBEAT" == "y" ]; then
   ask_user "HEARTBEAT_URL" "https://heartbeat.uptimerobot.com/xxx" "Enter the URL to get every minute for heartbeat monitoring" "str"
 fi
-ask_user "LOG_RETENTION_DAYS" "7" "How many days should logs be kept (default: 7)" "int"
+ask_user "LOG_RETENTION_DAYS" "7" "How many days should logs be kept (default: 7)" "num"
 
 # Check and stop MicroMPX service if running
 echo -e "${BLUE}►► Checking and stopping MicroMPX service if running...${NC}"
@@ -190,18 +204,6 @@ sed -i '/dtoverlay=vc4-fkms-v3d/ { /audio=off/! s/$/,audio=off/ }' "$CONFIG_FILE
 sed -i '/dtoverlay=vc4-kms-v3d/ { /noaudio/! s/$/,noaudio/ }' "$CONFIG_FILE" > /dev/null
 echo -e "${GREEN}✓ HDMI audio disabled${NC}"
 
-# Check if HiFiBerry is configured
-echo -e "${BLUE}►► Checking for HiFiBerry audio device...${NC}"
-if ! grep -q "^dtoverlay=hifiberry" "$CONFIG_FILE"; then
-  echo -e "${RED}No HiFiBerry card configured in $CONFIG_FILE${NC}"
-  echo -e "${RED}Please configure your HiFiBerry device before running this script.${NC}"
-  echo -e "${YELLOW}Add the appropriate dtoverlay line to $CONFIG_FILE${NC}"
-  echo -e "${YELLOW}Example: dtoverlay=hifiberry-dacplus${NC}\n"
-  exit 1
-fi
-HIFIBERRY_OVERLAY=$(grep "^dtoverlay=hifiberry" "$CONFIG_FILE" | head -n1)
-echo -e "${GREEN}✓ Found HiFiBerry configuration: ${HIFIBERRY_OVERLAY}${NC}"
-
 # Validate installation
 echo -e "${BLUE}►► Validating installation...${NC}"
 if [ ! -f "$MICROMPX_DECODER_PATH" ]; then
@@ -232,14 +234,14 @@ echo -e "${GREEN}✓ Installation Complete!${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 
 echo -e "${YELLOW}▸ Access MicroMPX:${NC}"
-echo -e "  Web Interface: ${CYAN}http://${FIRST_IP}:8080${NC}"
-echo -e "  Service Status: ${CYAN}systemctl status micrompx${NC}"
+echo -e "  Web Interface: ${BLUE}http://${FIRST_IP}:8080${NC}"
+echo -e "  Service Status: ${BLUE}systemctl status micrompx${NC}"
 
 echo -e "\n${YELLOW}▸ Service Management:${NC}"
-echo -e "  Start:   ${CYAN}systemctl start micrompx${NC}"
-echo -e "  Stop:    ${CYAN}systemctl stop micrompx${NC}"
-echo -e "  Restart: ${CYAN}systemctl restart micrompx${NC}"
-echo -e "  Logs:    ${CYAN}journalctl -u micrompx -f${NC}"
+echo -e "  Start:   ${BLUE}systemctl start micrompx${NC}"
+echo -e "  Stop:    ${BLUE}systemctl stop micrompx${NC}"
+echo -e "  Restart: ${BLUE}systemctl restart micrompx${NC}"
+echo -e "  Logs:    ${BLUE}journalctl -u micrompx -f${NC}"
 
 echo -e "\n${YELLOW}▸ Important Notes:${NC}"
 echo -e "  • Logs are stored in RAM disk to protect SD card"
@@ -251,7 +253,7 @@ fi
 
 if [[ "$ENABLE_HEARTBEAT" == "y" ]]; then
   echo -e "\n${YELLOW}▸ Heartbeat Monitoring:${NC}"
-  echo -e "  URL: ${CYAN}${HEARTBEAT_URL}${NC}"
+  echo -e "  URL: ${BLUE}${HEARTBEAT_URL}${NC}"
   echo -e "  Frequency: Every minute"
 fi
 
