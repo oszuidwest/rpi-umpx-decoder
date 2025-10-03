@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 # Configuration
 INSTALL_DIR="/opt/micrompx"
@@ -41,6 +42,9 @@ source "$FUNCTIONS_LIB_PATH"
 # Set color variables
 set_colors
 
+# Validate required tools
+require_tool curl awk grep sed systemctl wget useradd usermod chown chmod mkdir ln rm crontab
+
 # Check if running as root
 check_user_privileges privileged
 
@@ -68,7 +72,7 @@ fi
 
 # Banner
 cat << "EOF"
- ______     _     ___          __       _     ______ __  __ 
+ ______     _     ___          __       _     ______ __  __
 |___  /    (_)   | \ \        / /      | |   |  ____|  \/  |
    / /_   _ _  __| |\ \  /\  / /__  ___| |_  | |__  | \  / |
   / /| | | | |/ _` | \ \/  \/ / _ \/ __| __| |  __| | |\/| |
@@ -78,6 +82,7 @@ EOF
 
 # Greeting
 echo -e "${GREEN}⎎ MicroMPX Setup for Raspberry Pi${NC}\n\n"
+ask_user "DO_UPDATES" "y" "Do you want to perform all OS updates? (y/n)" "y/n"
 ask_user "ENABLE_HEARTBEAT" "n" "Do you want to integrate heartbeat monitoring via UptimeRobot (y/n)" "y/n"
 if [ "$ENABLE_HEARTBEAT" == "y" ]; then
   ask_user "HEARTBEAT_URL" "https://heartbeat.uptimerobot.com/xxx" "Enter the URL to get every minute for heartbeat monitoring" "str"
@@ -96,7 +101,9 @@ fi
 set_timezone Europe/Amsterdam
 
 # Update the OS
-update_os silent
+if [ "$DO_UPDATES" == "y" ]; then
+  update_os silent
+fi
 
 # Add user for micrompx
 echo -e "${BLUE}►► Setting up micrompx user...${NC}"
@@ -195,6 +202,29 @@ fi
 HIFIBERRY_OVERLAY=$(grep "^dtoverlay=hifiberry" "$CONFIG_FILE" | head -n1)
 echo -e "${GREEN}✓ Found HiFiBerry configuration: ${HIFIBERRY_OVERLAY}${NC}"
 
+# Validate installation
+echo -e "${BLUE}►► Validating installation...${NC}"
+if [ ! -f "$MICROMPX_DECODER_PATH" ]; then
+  echo -e "${RED}Installation failed: MicroMPX decoder binary not found at $MICROMPX_DECODER_PATH${NC}"
+  exit 1
+fi
+if [ ! -x "$MICROMPX_DECODER_PATH" ]; then
+  echo -e "${RED}Installation failed: MicroMPX decoder binary is not executable${NC}"
+  exit 1
+fi
+if [ ! -f "$MICROMPX_SERVICE_PATH" ]; then
+  echo -e "${RED}Installation failed: MicroMPX service file not found at $MICROMPX_SERVICE_PATH${NC}"
+  exit 1
+fi
+if [ ! -f "$RAMDISK_SERVICE_PATH" ]; then
+  echo -e "${RED}Installation failed: RAM disk service file not found at $RAMDISK_SERVICE_PATH${NC}"
+  exit 1
+fi
+if [ ! -L "$LOG_DIR" ]; then
+  echo -e "${RED}Installation failed: Log directory symlink not created at $LOG_DIR${NC}"
+  exit 1
+fi
+echo -e "${GREEN}✓ Installation validated successfully${NC}"
 
 # Post-installation information
 echo -e "\n${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
