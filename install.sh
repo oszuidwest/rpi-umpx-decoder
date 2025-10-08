@@ -12,7 +12,7 @@ FUNCTIONS_LIB_PATH="/tmp/functions.sh"
 FUNCTIONS_LIB_URL="https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh"
 
 # Set-up MicroMPX
-MICROMPX_DEFAULT_VERSION="1070"
+MICROMPX_DEFAULT_VERSION="1071"
 MICROMPX_DECODER_PATH="${INSTALL_DIR}/MicroMPX_Decoder"
 MICROMPX_SERVICE_PATH="/etc/systemd/system/micrompx.service"
 MICROMPX_SERVICE_URL="${REPO_BASE}/micrompx.service"
