@@ -167,7 +167,10 @@ systemctl start ramdisk
 echo -e "${GREEN}✓ RAM disk service installed${NC}"
 
 # Put MicroMPX logs on RAM disk
-if [ -d "$LOG_DIR" ]; then
+# Remove existing directory or symlink safely to prevent race conditions
+if [ -L "$LOG_DIR" ]; then
+  rm -f "$LOG_DIR"
+elif [ -d "$LOG_DIR" ]; then
   echo -e "${YELLOW}Removing existing log directory...${NC}"
   rm -rf "$LOG_DIR"
 fi
@@ -176,14 +179,14 @@ chown -R micrompx:micrompx "$RAMDISK_PATH"
 echo -e "${GREEN}✓ Logs linked to RAM disk${NC}"
 
 # Clean logs to save space on the RAM disk (MicroMPX does this every 30 days)
-LOGS_CRONJOB="0 0 * * * find -L $LOG_DIR -type f -mtime +${LOG_RETENTION_DAYS} -exec rm {} \;"
+LOGS_CRONJOB="0 0 * * * find -L '$LOG_DIR' -type f -mtime +${LOG_RETENTION_DAYS} -exec rm {} \;"
 echo -e "${BLUE}►► Setting up log file deletion cronjob...${NC}"
 # Check if the crontab exists for the current user, create one if not
 if ! crontab -l 2>/dev/null; then
   echo "" | crontab -
 fi
 # Remove any existing log cleanup jobs first
-crontab -l 2>/dev/null | grep -v "find -L $LOG_DIR" | crontab -
+crontab -l 2>/dev/null | grep -v "find -L '$LOG_DIR'" | crontab -
 # Add the new cron job
 (crontab -l 2>/dev/null; echo "$LOGS_CRONJOB") | crontab -
 echo -e "${GREEN}✓ Log cleanup scheduled (${LOG_RETENTION_DAYS} day retention)${NC}"
@@ -191,7 +194,7 @@ echo -e "${GREEN}✓ Log cleanup scheduled (${LOG_RETENTION_DAYS} day retention)
 # Heartbeat monitoring
 if [ "$ENABLE_HEARTBEAT" == "y" ]; then
   echo -e "${BLUE}►► Setting up heartbeat monitoring...${NC}"
-  HEARTBEAT_CRONJOB="* * * * * wget --spider $HEARTBEAT_URL > /dev/null 2>&1"
+  HEARTBEAT_CRONJOB="* * * * * wget --spider '$HEARTBEAT_URL' > /dev/null 2>&1"
   if ! crontab -l | grep -F -- "$HEARTBEAT_CRONJOB" > /dev/null; then
     (crontab -l 2>/dev/null; echo "$HEARTBEAT_CRONJOB") | crontab -
     echo -e "${GREEN}✓ Heartbeat monitoring configured${NC}"
