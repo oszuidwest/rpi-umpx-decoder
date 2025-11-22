@@ -8,8 +8,11 @@ RAMDISK_PATH="/mnt/ramdisk"
 REPO_BASE="https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main"
 
 # Set-up the functions library
-FUNCTIONS_LIB_PATH="/tmp/functions.sh"
+FUNCTIONS_LIB_PATH=$(mktemp)
 FUNCTIONS_LIB_URL="https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh"
+
+# Clean up temporary file on exit
+trap 'rm -f "$FUNCTIONS_LIB_PATH"' EXIT
 
 # Set-up MicroMPX
 MICROMPX_DEFAULT_VERSION="1071"
@@ -28,15 +31,14 @@ FIRST_IP=$(hostname -I | awk '{print $1}')
 # Start with a clean terminal
 clear
 
-# Remove old functions library and download the latest version
-rm -f "$FUNCTIONS_LIB_PATH"
+# Download the functions library
 if ! curl -s -o "$FUNCTIONS_LIB_PATH" "$FUNCTIONS_LIB_URL"; then
   echo -e "*** Failed to download functions library. Please check your network connection! ***"
   exit 1
 fi
 
 # Source the functions file
-# shellcheck source=/tmp/functions.sh
+# shellcheck source=/dev/null
 source "$FUNCTIONS_LIB_PATH"
 
 # Set color variables
