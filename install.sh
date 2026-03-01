@@ -9,7 +9,7 @@ REPO_BASE="https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main"
 
 # Set-up the functions library
 FUNCTIONS_LIB_PATH=$(mktemp)
-FUNCTIONS_LIB_URL="https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh"
+FUNCTIONS_LIB_URL="https://raw.githubusercontent.com/oszuidwest/bash-functions/v2/common-functions.sh"
 
 # Clean up temporary file on exit
 trap 'rm -f "$FUNCTIONS_LIB_PATH"' EXIT
@@ -45,17 +45,17 @@ source "$FUNCTIONS_LIB_PATH"
 set_colors
 
 # Validate required tools
-require_tool curl awk grep sed systemctl wget useradd usermod chown chmod mkdir ln rm crontab
+assert_tool curl awk grep sed systemctl wget useradd usermod chown chmod mkdir ln rm crontab
 
 # Check if running as root
-check_user_privileges privileged
+assert_user_privileged "root"
 
 # Check if this is Linux
-is_this_linux
-is_this_os_64bit
+assert_os_linux
+assert_os_64bit
 
 # Check if we are running on a Raspberry Pi 4 or newer
-check_rpi_model 4
+assert_hw_rpi 4
 
 # Extract actual model number for conditional features (e.g., analog audio on Pi 4)
 RPI_MODEL_STRING=$(tr -d '\0' < /proc/device-tree/model)
@@ -98,12 +98,12 @@ EOF
 
 # Greeting
 echo -e "${GREEN}⎎ MicroMPX Setup for Raspberry Pi${NC}\n\n"
-ask_user "DO_UPDATES" "y" "Do you want to perform all OS updates? (y/n)" "y/n"
-ask_user "ENABLE_HEARTBEAT" "n" "Do you want to integrate heartbeat monitoring via UptimeRobot (y/n)" "y/n"
+prompt_user "DO_UPDATES" "y" "Do you want to perform all OS updates? (y/n)" "y/n"
+prompt_user "ENABLE_HEARTBEAT" "n" "Do you want to integrate heartbeat monitoring via UptimeRobot (y/n)" "y/n"
 if [ "$ENABLE_HEARTBEAT" == "y" ]; then
-  ask_user "HEARTBEAT_URL" "https://heartbeat.uptimerobot.com/xxx" "Enter the URL to get every minute for heartbeat monitoring" "str"
+  prompt_user "HEARTBEAT_URL" "https://heartbeat.uptimerobot.com/xxx" "Enter the URL to get every minute for heartbeat monitoring" "str"
 fi
-ask_user "LOG_RETENTION_DAYS" "7" "How many days should logs be kept (default: 7)" "num"
+prompt_user "LOG_RETENTION_DAYS" "7" "How many days should logs be kept (default: 7)" "num"
 
 # Check and stop MicroMPX service if running
 echo -e "${BLUE}►► Checking and stopping MicroMPX service if running...${NC}"
@@ -118,7 +118,7 @@ set_timezone Europe/Amsterdam
 
 # Update the OS
 if [ "$DO_UPDATES" == "y" ]; then
-  update_os silent
+  apt_update --silent
 fi
 
 # Add user for micrompx
@@ -138,7 +138,7 @@ else
 fi
 
 # Install dependencies
-install_packages silent libasound2 libsndfile1 wget
+apt_install --silent libasound2 libsndfile1 wget
 
 # Download MicroMPX from Thimeo
 echo -e "${BLUE}►► Downloading and installing MicroMPX...${NC}"
