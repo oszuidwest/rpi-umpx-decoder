@@ -9,7 +9,7 @@ REPO_BASE="https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main"
 
 # Set-up the functions library
 FUNCTIONS_LIB_PATH=$(mktemp)
-FUNCTIONS_LIB_URL="https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh"
+FUNCTIONS_LIB_URL="https://raw.githubusercontent.com/oszuidwest/bash-functions/v2/common-functions.sh"
 
 # Clean up temporary file on exit
 trap 'rm -f "$FUNCTIONS_LIB_PATH"' EXIT
@@ -45,23 +45,25 @@ source "$FUNCTIONS_LIB_PATH"
 set_colors
 
 # Validate required tools
-require_tool curl awk grep sed systemctl wget useradd usermod chown chmod mkdir ln rm crontab
+assert_tool curl awk grep sed systemctl useradd usermod chown chmod mkdir ln rm crontab
 
 # Check if running as root
-check_user_privileges privileged
+assert_user_privileged "root"
 
 # Check if this is Linux
-is_this_linux
-is_this_os_64bit
+assert_os_linux
+assert_os_64bit
 
 # Check if we are running on a Raspberry Pi 4 or newer
-check_rpi_model 4
+assert_hw_rpi 4
 
-# Extract actual model number for conditional features (e.g., analog audio on Pi 4)
+# Extract actual model number for conditional features
 RPI_MODEL_STRING=$(tr -d '\0' < /proc/device-tree/model)
+RPI_MODEL=""
 if [[ $RPI_MODEL_STRING =~ Raspberry\ Pi\ ([0-9]+) ]]; then
   RPI_MODEL=${BASH_REMATCH[1]}
 fi
+SUPPORTS_ANALOG_AUDIO=$([[ "$RPI_MODEL" != "5" ]] && echo "true" || echo "false")
 
 # Determine the correct config file path
 CONFIG_FILE=""
@@ -98,12 +100,16 @@ EOF
 
 # Greeting
 echo -e "${GREEN}⎎ MicroMPX Setup for Raspberry Pi${NC}\n\n"
-ask_user "DO_UPDATES" "y" "Do you want to perform all OS updates? (y/n)" "y/n"
-ask_user "ENABLE_HEARTBEAT" "n" "Do you want to integrate heartbeat monitoring via UptimeRobot (y/n)" "y/n"
+prompt_user "DO_UPDATES" "y" "Perform OS updates? (y/n)" "y/n"
+prompt_user "ENABLE_HEARTBEAT" "n" "Enable UptimeRobot heartbeat monitoring? (y/n)" "y/n"
 if [ "$ENABLE_HEARTBEAT" == "y" ]; then
-  ask_user "HEARTBEAT_URL" "https://heartbeat.uptimerobot.com/xxx" "Enter the URL to get every minute for heartbeat monitoring" "str"
+  prompt_user "HEARTBEAT_URL" "https://heartbeat.uptimerobot.com/xxx" "Heartbeat URL (called every minute)" "str"
+  if [[ ! "$HEARTBEAT_URL" =~ ^https?:// ]]; then
+    echo -e "${RED}Invalid URL format. Must start with http:// or https://${NC}"
+    exit 1
+  fi
 fi
-ask_user "LOG_RETENTION_DAYS" "7" "How many days should logs be kept (default: 7)" "num"
+prompt_user "LOG_RETENTION_DAYS" "7" "Log retention in days" "num"
 
 # Check and stop MicroMPX service if running
 echo -e "${BLUE}►► Checking and stopping MicroMPX service if running...${NC}"
@@ -118,7 +124,7 @@ set_timezone Europe/Amsterdam
 
 # Update the OS
 if [ "$DO_UPDATES" == "y" ]; then
-  update_os silent
+  apt_update --silent
 fi
 
 # Add user for micrompx
@@ -138,13 +144,18 @@ else
 fi
 
 # Install dependencies
-install_packages silent libasound2 libsndfile1 wget
+apt_install --silent libasound2 libsndfile1
 
 # Download MicroMPX from Thimeo
 echo -e "${BLUE}►► Downloading and installing MicroMPX...${NC}"
 MICROMPX_DECODER_URL="https://download.thimeo.com/MicroMPX_Decoder_ARM64_${MICROMPX_DEFAULT_VERSION}"
 mkdir -p "$INSTALL_DIR" > /dev/null
-curl -s -o "$MICROMPX_DECODER_PATH" "$MICROMPX_DECODER_URL"
+if ! curl -s -o "$MICROMPX_DECODER_PATH" "$MICROMPX_DECODER_URL"; then
+  echo -e "${RED}Failed to download MicroMPX decoder${NC}"
+  echo -e "${YELLOW}URL: $MICROMPX_DECODER_URL${NC}"
+  echo -e "${YELLOW}Check network connection and URL availability${NC}"
+  exit 1
+fi
 chmod +x "$MICROMPX_DECODER_PATH" > /dev/null
 setcap CAP_NET_BIND_SERVICE=+eip "$MICROMPX_DECODER_PATH" > /dev/null
 echo -e "${GREEN}✓ MicroMPX decoder installed${NC}"
@@ -194,8 +205,8 @@ echo -e "${GREEN}✓ Log cleanup scheduled (${LOG_RETENTION_DAYS} day retention)
 # Heartbeat monitoring
 if [ "$ENABLE_HEARTBEAT" == "y" ]; then
   echo -e "${BLUE}►► Setting up heartbeat monitoring...${NC}"
-  HEARTBEAT_CRONJOB="* * * * * wget --spider '$HEARTBEAT_URL' > /dev/null 2>&1"
-  if ! crontab -l | grep -F -- "$HEARTBEAT_CRONJOB" > /dev/null; then
+  HEARTBEAT_CRONJOB="* * * * * curl -fsS --max-time 10 -o /dev/null '$HEARTBEAT_URL' > /dev/null 2>&1"
+  if ! crontab -l | grep -F -- "$HEARTBEAT_URL" > /dev/null; then
     (crontab -l 2>/dev/null; echo "$HEARTBEAT_CRONJOB") | crontab -
     echo -e "${GREEN}✓ Heartbeat monitoring configured${NC}"
   else
@@ -251,7 +262,7 @@ echo -e "  Logs:    ${BLUE}journalctl -u micrompx -f${NC}"
 echo -e "\n${YELLOW}▸ Important Notes:${NC}"
 echo -e "  • Logs are stored in RAM disk to protect SD card"
 echo -e "  • Logs are automatically cleaned after ${LOG_RETENTION_DAYS} days"
-if [[ "$RPI_MODEL" != "5" ]]; then
+if [[ "$SUPPORTS_ANALOG_AUDIO" == "true" ]]; then
   echo -e "  • Analog audio output is enabled for monitoring"
 fi
 
