@@ -127,6 +127,10 @@ if [ "$DO_UPDATES" == "y" ]; then
   apt_update --silent
 fi
 
+if declare -F set_system_hardening_baseline > /dev/null; then
+  set_system_hardening_baseline --silent
+fi
+
 # Add user for micrompx
 echo -e "${BLUE}►► Setting up micrompx user...${NC}"
 if ! id -u micrompx > /dev/null; then
