@@ -119,8 +119,10 @@ else
   echo -e "${YELLOW}MicroMPX service is not running.${NC}"
 fi
 
-# Timezone configuration
+# Configure host time settings and journald storage limits
 set_timezone Europe/Amsterdam
+set_time_sync
+set_journald_limits
 
 # Update the OS
 if [ "$DO_UPDATES" == "y" ]; then
