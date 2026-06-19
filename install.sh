@@ -121,6 +121,8 @@ fi
 
 # Timezone configuration
 set_timezone Europe/Amsterdam
+set_time_sync
+set_journald_limits
 
 # Update the OS
 if [ "$DO_UPDATES" == "y" ]; then
