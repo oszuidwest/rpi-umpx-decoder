@@ -7,20 +7,19 @@ LOG_DIR="/home/micrompx/.MicroMPX_Decoder.log"
 RAMDISK_PATH="/mnt/ramdisk"
 REPO_BASE="https://raw.githubusercontent.com/oszuidwest/rpi-umpx-decoder/main"
 
-# Set-up the functions library
+BASH_FUNCTIONS_REF="main"
 FUNCTIONS_LIB_PATH=$(mktemp)
-FUNCTIONS_LIB_URL="https://raw.githubusercontent.com/oszuidwest/bash-functions/main/common-functions.sh"
+FUNCTIONS_LIB_URL="https://raw.githubusercontent.com/oszuidwest/bash-functions/${BASH_FUNCTIONS_REF}/common-functions.sh"
 
-# Clean up temporary file on exit
 trap 'rm -f "$FUNCTIONS_LIB_PATH"' EXIT
 
-# Set-up MicroMPX
+# Set up MicroMPX
 MICROMPX_DEFAULT_VERSION="1075"
 MICROMPX_DECODER_PATH="${INSTALL_DIR}/MicroMPX_Decoder"
 MICROMPX_SERVICE_PATH="/etc/systemd/system/micrompx.service"
 MICROMPX_SERVICE_URL="${REPO_BASE}/micrompx.service"
 
-# Set-up RAM disk
+# Set up RAM disk
 RAMDISK_SERVICE_PATH="/etc/systemd/system/ramdisk.service"
 RAMDISK_SERVICE_URL="${REPO_BASE}/ramdisk.service"
 
@@ -28,16 +27,18 @@ RAMDISK_SERVICE_URL="${REPO_BASE}/ramdisk.service"
 CONFIG_FILE_PATHS=("/boot/firmware/config.txt" "/boot/config.txt")
 FIRST_IP=$(hostname -I | awk '{print $1}')
 
-# Start with a clean terminal
-clear
+clear || true
 
-# Download the functions library
-if ! curl -s -o "$FUNCTIONS_LIB_PATH" "$FUNCTIONS_LIB_URL"; then
-  echo -e "*** Failed to download functions library. Please check your network connection! ***"
+if ! command -v curl >/dev/null 2>&1; then
+  echo "*** curl is required to download the functions library. ***"
   exit 1
 fi
 
-# Source the functions file
+if ! curl -fsSL -o "$FUNCTIONS_LIB_PATH" "$FUNCTIONS_LIB_URL"; then
+  echo "*** Failed to download functions library. Please check your network connection. ***"
+  exit 1
+fi
+
 # shellcheck source=/dev/null
 source "$FUNCTIONS_LIB_PATH"
 
@@ -154,10 +155,7 @@ apt_install --silent libasound2 libsndfile1
 echo -e "${BLUE}►► Downloading and installing MicroMPX...${NC}"
 MICROMPX_DECODER_URL="https://download.thimeo.com/MicroMPX_Decoder_ARM64_${MICROMPX_DEFAULT_VERSION}"
 mkdir -p "$INSTALL_DIR" > /dev/null
-if ! curl -s -o "$MICROMPX_DECODER_PATH" "$MICROMPX_DECODER_URL"; then
-  echo -e "${RED}Failed to download MicroMPX decoder${NC}"
-  echo -e "${YELLOW}URL: $MICROMPX_DECODER_URL${NC}"
-  echo -e "${YELLOW}Check network connection and URL availability${NC}"
+if ! file_download "$MICROMPX_DECODER_URL" "$MICROMPX_DECODER_PATH" "MicroMPX decoder"; then
   exit 1
 fi
 chmod +x "$MICROMPX_DECODER_PATH" > /dev/null
@@ -166,19 +164,24 @@ echo -e "${GREEN}✓ MicroMPX decoder installed${NC}"
 
 # Add service
 echo -e "${BLUE}►► Installing MicroMPX service...${NC}"
-rm -f "$MICROMPX_SERVICE_PATH" > /dev/null
-curl -s -o "$MICROMPX_SERVICE_PATH" "$MICROMPX_SERVICE_URL"
+if ! file_download "$MICROMPX_SERVICE_URL" "$MICROMPX_SERVICE_PATH" "MicroMPX service" --backup; then
+  exit 1
+fi
 systemctl daemon-reload > /dev/null
 systemctl enable micrompx > /dev/null
 echo -e "${GREEN}✓ MicroMPX service installed${NC}"
 
 # Add RAM disk
 echo -e "${BLUE}►► Setting up RAM disk for logs...${NC}"
-rm -f "$RAMDISK_SERVICE_PATH" > /dev/null
-curl -s -o "$RAMDISK_SERVICE_PATH" "$RAMDISK_SERVICE_URL"
+if ! file_download "$RAMDISK_SERVICE_URL" "$RAMDISK_SERVICE_PATH" "RAM disk service" --backup; then
+  exit 1
+fi
 systemctl daemon-reload > /dev/null
 systemctl enable ramdisk > /dev/null
-systemctl start ramdisk
+if ! systemctl start ramdisk; then
+  echo -e "${RED}Failed to start RAM disk service${NC}"
+  exit 1
+fi
 echo -e "${GREEN}✓ RAM disk service installed${NC}"
 
 # Put MicroMPX logs on RAM disk
@@ -220,9 +223,24 @@ fi
 
 # Disable HDMI audio to use the mini-jack for monitoring
 echo -e "${BLUE}►► Configuring audio settings...${NC}"
+if ! file_backup "$CONFIG_FILE"; then
+  exit 1
+fi
 sed -i '/dtoverlay=vc4-fkms-v3d/ { /audio=off/! s/$/,audio=off/ }' "$CONFIG_FILE" > /dev/null
 sed -i '/dtoverlay=vc4-kms-v3d/ { /noaudio/! s/$/,noaudio/ }' "$CONFIG_FILE" > /dev/null
 echo -e "${GREEN}✓ HDMI audio disabled${NC}"
+
+echo -e "${BLUE}►► Starting services...${NC}"
+if ! systemctl restart ramdisk; then
+  echo -e "${RED}Installation failed: RAM disk service failed to start${NC}"
+  exit 1
+fi
+
+if ! systemctl restart micrompx; then
+  echo -e "${RED}Installation failed: MicroMPX service failed to start${NC}"
+  echo -e "${YELLOW}Check logs with: journalctl -u micrompx -n 50${NC}"
+  exit 1
+fi
 
 # Validate installation
 echo -e "${BLUE}►► Validating installation...${NC}"
@@ -244,6 +262,15 @@ if [ ! -f "$RAMDISK_SERVICE_PATH" ]; then
 fi
 if [ ! -L "$LOG_DIR" ]; then
   echo -e "${RED}Installation failed: Log directory symlink not created at $LOG_DIR${NC}"
+  exit 1
+fi
+if ! systemctl is-active --quiet ramdisk; then
+  echo -e "${RED}Installation failed: RAM disk service is not active${NC}"
+  exit 1
+fi
+if ! systemctl is-active --quiet micrompx; then
+  echo -e "${RED}Installation failed: MicroMPX service is not active${NC}"
+  echo -e "${YELLOW}Check logs with: journalctl -u micrompx -n 50${NC}"
   exit 1
 fi
 echo -e "${GREEN}✓ Installation validated successfully${NC}"
