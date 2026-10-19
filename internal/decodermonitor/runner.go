@@ -40,9 +40,16 @@ func (r *Runner) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	heartbeat := time.Now().Add(-time.Minute)
 	pruned := time.Time{}
+	mailCheck := true // once per start; a full outbox retries on the next poll
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
+		}
+		if mailCheck {
+			var err error
+			if mailCheck, err = r.queueMailCheck(); err != nil {
+				return err
+			}
 		}
 		err := r.poll(ctx)
 		// A full queue waits for delivery instead of ending observation: the
@@ -75,6 +82,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// queueMailCheck reports whether the start-up mail check must be retried
+// because the outbox is full.
+func (r *Runner) queueMailCheck() (retry bool, err error) {
+	engine := Engine{Config: r.Config}
+	err = r.Store.Update(nil, time.Now(), func(s *State) error { return engine.MailCheck(s, time.Now()) })
+	if errors.Is(err, errOutboxFull) {
+		return true, nil
+	}
+	return false, err
 }
 
 func (r *Runner) poll(ctx context.Context) error {

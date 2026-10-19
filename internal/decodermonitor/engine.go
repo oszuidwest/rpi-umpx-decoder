@@ -115,6 +115,16 @@ func (e *Engine) unknown(s *State, now time.Time) error {
 	return nil
 }
 
+// MailCheck queues one real notification after a start while a credential
+// failure is latched: only a mail accepted by Graph clears the latch and
+// restores the heartbeat. Any queued real mail serves the same purpose.
+func (e *Engine) MailCheck(s *State, now time.Time) error {
+	if !e.Config.SendMail || !s.MailCredentialFailed || slices.ContainsFunc(s.Outbox, func(m Mail) bool { return !m.Preview }) {
+		return nil
+	}
+	return e.enqueue(s, now, "[MAIL CHECK] Watchdog mail delivery check", "An earlier notification was rejected by Microsoft Graph (HTTP 401/403) and moved to dead_letters in state.json. The heartbeat stays withheld until a notification is accepted. This message checks delivery after a watchdog start; it does not report a decoder incident.", 0)
+}
+
 // Failed records uncertainty without clearing an existing decoder incident.
 func (e *Engine) Failed(s *State, now time.Time) error {
 	s.LastObserved = time.Time{}

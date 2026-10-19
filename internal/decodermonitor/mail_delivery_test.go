@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -354,4 +355,105 @@ func TestStoreRejectsOversizedDeadLetters(t *testing.T) {
 		_ = reopened.Close()
 		t.Fatal("oversized dead-letter history accepted")
 	}
+}
+
+func TestMailCheckIsQueuedOnceWhileCredentialFailureIsLatched(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultConfig()
+	cfg.Site, cfg.SendMail = "Test", true
+	e, at := Engine{cfg}, time.Now()
+	for _, tc := range []struct {
+		name     string
+		state    State
+		sendMail bool
+		want     int
+	}{
+		{"latched", State{Version: 1, MailCredentialFailed: true}, true, 1},
+		{"not_latched", State{Version: 1}, true, 0},
+		{"mail_disabled", State{Version: 1, MailCredentialFailed: true}, false, 0},
+		{"real_mail_queued", State{Version: 1, MailCredentialFailed: true, Outbox: []Mail{{ID: 7}}}, true, 1},
+		{"only_preview_queued", State{Version: 1, MailCredentialFailed: true, Outbox: []Mail{{ID: 7, Preview: true}}}, true, 2},
+	} {
+		e.Config.SendMail = tc.sendMail
+		s := tc.state
+		for range 2 {
+			if err := e.MailCheck(&s, at); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if len(s.Outbox) != tc.want {
+			t.Errorf("%s: outbox=%d, want %d", tc.name, len(s.Outbox), tc.want)
+		}
+		if tc.want > len(tc.state.Outbox) && (!strings.HasPrefix(s.Outbox[len(s.Outbox)-1].Subject, "[MAIL CHECK]") || s.Outbox[len(s.Outbox)-1].Preview) {
+			t.Errorf("%s: no real mail check queued: %+v", tc.name, s.Outbox)
+		}
+	}
+}
+
+func TestRunQueuesMailCheckSoTheLatchCanClear(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg, store := testStore(t)
+		cfg.SendMail = true
+		if err := store.Update(nil, time.Now(), func(s *State) error { s.MailCredentialFailed = true; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		sender := &fakeSender{}
+		entered := make(chan struct{})
+		r := Runner{Config: cfg, Store: store, Probe: canceledProbe{entered}, Sender: sender}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- r.Run(ctx) }()
+		<-entered
+		time.Sleep(time.Second)
+		synctest.Wait()
+		cancel()
+		if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+		s, err := store.Snapshot()
+		if err != nil || sender.calls != 1 || !strings.HasPrefix(sender.subject, "[MAIL CHECK]") || s.MailCredentialFailed {
+			t.Fatalf("mail check not sent or latch not cleared: calls=%d subject=%q state=%+v %v", sender.calls, sender.subject, s, err)
+		}
+	})
+}
+
+type healthyRunProbe struct{ polls uint64 }
+
+func (p *healthyRunProbe) Read(context.Context, Bookmark) (Probe, error) {
+	p.polls++
+	return *healthyProbe(time.Now(), p.polls*1920000), nil
+}
+
+func TestMailCheckWaitsForAFullOutboxToDrain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg, store := testStore(t)
+		cfg.SendMail = true
+		if err := store.Update(nil, time.Now(), func(s *State) error {
+			s.MailCredentialFailed = true
+			for i := range maxOutbox {
+				s.Outbox = append(s.Outbox, Mail{ID: uint64(i) + 1, Preview: true, Created: time.Now()})
+			}
+			s.NextID = maxOutbox
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		sender := &fakeSender{}
+		r := Runner{Config: cfg, Store: store, Probe: &healthyRunProbe{}, Sender: sender}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- r.Run(ctx) }()
+		// Previews drain one per mail tick; the check is queued afterwards.
+		time.Sleep(time.Duration(maxOutbox+10) * 2 * time.Second)
+		synctest.Wait()
+		cancel()
+		if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("a full outbox stopped the watchdog at start: %v", err)
+		}
+		s, err := store.Snapshot()
+		// Queued behind the previews, the check can be labelled [DELAYED].
+		if err != nil || sender.calls != 1 || !strings.Contains(sender.subject, "[MAIL CHECK]") || s.MailCredentialFailed {
+			t.Fatalf("mail check not retried after the outbox drained: calls=%d subject=%q latched=%v %v", sender.calls, sender.subject, s.MailCredentialFailed, err)
+		}
+	})
 }
