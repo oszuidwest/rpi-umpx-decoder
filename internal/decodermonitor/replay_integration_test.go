@@ -91,13 +91,13 @@ func TestIncidentEvidenceReplay(t *testing.T) {
 					t.Fatalf("clean decoder alarmed: records=%d incidents=%d recoveries=%d", starvations, len(incidents), recoveries)
 				}
 			} else {
-				if starvations != 1433 || len(incidents) != 1 || warnings != 1 || criticals == 0 || recoveries != 1 {
+				if starvations != 1433 || len(incidents) != 1 || warnings != 1 || criticals != 8 || recoveries != 1 {
 					t.Fatalf("unexpected replay: records=%d incidents=%d warnings=%d criticals=%d recoveries=%d", starvations, len(incidents), warnings, criticals, recoveries)
 				}
-				if criticalAt.Hour() != 8 || criticalAt.Minute() != 15 {
+				if criticalAt.Hour() != 8 || criticalAt.Minute() != 15 || criticalAt.Second() != 10 {
 					t.Fatalf("critical at %s", criticalAt)
 				}
-				if recoveryAt.Hour() != 10 || recoveryAt.Minute() != 9 {
+				if recoveryAt.Hour() != 10 || recoveryAt.Minute() != 9 || recoveryAt.Second() != 20 {
 					t.Fatalf("recovery at %s", recoveryAt)
 				}
 			}

@@ -141,3 +141,28 @@ func TestReadPCMUsesProcStatusWithoutOpeningAudio(t *testing.T) {
 		t.Fatal("unsafe proc path accepted")
 	}
 }
+
+func TestParseServiceStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name, output, active string
+		pid                  int
+		entered              float64
+	}{
+		{"active", "MainPID=100\nActiveEnterTimestampMonotonic=123456789\nActiveState=active\n", "active", 100, 123.456789},
+		{"never_active", "ActiveState=activating\nMainPID=0\nActiveEnterTimestampMonotonic=0\n", "activating", 0, 0},
+		{"missing_timestamp", "ActiveState=active\nMainPID=100\n", "", 0, 0},
+		{"missing_pid", "ActiveState=active\nActiveEnterTimestampMonotonic=123\n", "", 0, 0},
+		{"missing_state", "MainPID=100\nActiveEnterTimestampMonotonic=123\n", "", 0, 0},
+		{"invalid_timestamp", "ActiveState=active\nMainPID=100\nActiveEnterTimestampMonotonic=invalid\n", "", 0, 0},
+		{"negative_timestamp", "ActiveState=active\nMainPID=100\nActiveEnterTimestampMonotonic=-1\n", "", 0, 0},
+		{"negative_pid", "ActiveState=active\nMainPID=-1\nActiveEnterTimestampMonotonic=0\n", "", 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			active, pid, entered, err := parseServiceStatus(tc.output)
+			if (err != nil) != (tc.active == "") || active != tc.active || pid != tc.pid || entered != tc.entered {
+				t.Fatalf("status = %q, %d, %f, %v", active, pid, entered, err)
+			}
+		})
+	}
+}

@@ -62,3 +62,27 @@ func TestConfigRejectsMissingPublicAndOversizeFiles(t *testing.T) {
 		t.Fatal("oversize config accepted")
 	}
 }
+
+func TestConfigStartupGrace(t *testing.T) {
+	t.Parallel()
+	cfg, err := LoadConfig(privateConfig(t, `{"site":"Test"}`))
+	if err != nil || cfg.StartupGraceSeconds != 60 {
+		t.Fatalf("startup grace default: %d, %v", cfg.StartupGraceSeconds, err)
+	}
+	for _, tc := range []struct {
+		name, value string
+		valid       bool
+	}{
+		{"minimum", "10", true}, {"maximum", "600", true},
+		{"below_minimum", "9", false}, {"above_maximum", "601", false},
+		{"zero", "0", false}, {"null", "null", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := LoadConfig(privateConfig(t, `{"site":"Test","startup_grace_seconds":`+tc.value+`}`))
+			if (err == nil) != tc.valid {
+				t.Fatalf("grace %s: config=%+v error=%v", tc.value, cfg, err)
+			}
+		})
+	}
+}

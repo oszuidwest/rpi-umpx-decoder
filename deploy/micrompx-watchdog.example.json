@@ -6,6 +6,7 @@
   "send_mail": false,
   "heartbeat_url": "",
   "poll_seconds": 10,
+  "startup_grace_seconds": 60,
   "recovery_seconds": 900,
   "reminder_seconds": 900,
   "unknown_seconds": 60,
