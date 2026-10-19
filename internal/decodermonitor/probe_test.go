@@ -127,17 +127,83 @@ func TestReadPCMUsesProcStatusWithoutOpeningAudio(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = root.Close() }()
-	pcm := readPCM(root, "/proc/asound/hifiberry/pcm0p/sub0/status")
-	if pcm.State != "RUNNING" || pcm.Owner != 100 || pcm.Hardware != 1000 || pcm.Applied != 2000 {
+	pcm, err := readPCM(root, "/proc/asound/hifiberry/pcm0p/sub0/status")
+	if err != nil || pcm.State != "RUNNING" || pcm.Owner != 100 || pcm.Hardware != 1000 || pcm.Applied != 2000 {
 		t.Fatalf("bad PCM parse: %+v", pcm)
 	}
 	if err := os.WriteFile(path, []byte("closed\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := readPCM(root, "/proc/asound/hifiberry/pcm0p/sub0/status"); got.State != "closed" {
+	if got, err := readPCM(root, "/proc/asound/hifiberry/pcm0p/sub0/status"); err != nil || got.State != "closed" {
 		t.Fatal(got)
 	}
-	if got := readPCM(root, "/proc/asound/../../etc/passwd"); got.State != "unavailable" {
+	if got, err := readPCM(root, "/proc/asound/../../etc/passwd"); err == nil || got.State != "unavailable" {
 		t.Fatal("unsafe proc path accepted")
+	}
+}
+
+func TestReadPCMUnavailableReasons(t *testing.T) {
+	status := "state: RUNNING\nowner_pid: 321\ntrigger_time: 123.456\nhw_ptr: 1000\nappl_ptr: 2000\n"
+	for _, tc := range []struct {
+		name, status, process, want string
+	}{
+		{"missing_status", "", "", "PCM status /proc/asound/card/pcm0p/sub0/status: read kernel status: open"},
+		{"unreadable_status", "directory", "", "PCM status /proc/asound/card/pcm0p/sub0/status: invalid kernel status: read"},
+		{"owner_pid", strings.ReplaceAll(status, "321", "invalid-value"), "", "missing or invalid owner_pid"},
+		{"hw_ptr", strings.ReplaceAll(status, "1000", "invalid-value"), "", "missing or invalid hw_ptr"},
+		{"appl_ptr", strings.ReplaceAll(status, "2000", "invalid-value"), "", "missing or invalid appl_ptr"},
+		{"state", strings.ReplaceAll(status, "state: RUNNING\n", ""), "", "missing or invalid state"},
+		{"trigger_time", strings.ReplaceAll(status, "trigger_time: 123.456\n", ""), "", "missing or invalid trigger_time"},
+		{"missing_owner_status", status, "", "PCM owner 321 process status: read kernel status: open"},
+		{"unreadable_owner_status", status, "directory", "PCM owner 321 process status: invalid kernel status: read"},
+		{"missing_tgid", status, "Name: MicroMPX\n", "PCM owner 321 process status: missing or invalid Tgid"},
+		{"invalid_tgid", status, "Tgid: invalid-value\n", "PCM owner 321 process status: missing or invalid Tgid"},
+		{"zero_tgid", status, "Tgid: 0\n", "PCM owner 321 process status: missing or invalid Tgid"},
+		{"negative_tgid", status, "Tgid: -1\n", "PCM owner 321 process status: missing or invalid Tgid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			for name, content := range map[string]string{"asound/card/pcm0p/sub0/status": tc.status, "321/status": tc.process} {
+				if content == "" {
+					continue
+				}
+				path := filepath.Join(dir, name)
+				if content == "directory" {
+					if err := os.MkdirAll(path, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					continue
+				}
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = root.Close() }()
+			pcm, err := readPCM(root, "/proc/asound/card/pcm0p/sub0/status")
+			if pcm.State != "unavailable" || err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "invalid-value") {
+				t.Fatalf("missing concrete safe PCM diagnostic: %+v %v; want %q", pcm, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestShortDiagnostic(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ input, want string }{
+		{"kernel: permission denied\r\nsecond line", "kernel: permission denied"},
+		{"systemd\x00\t\x1b[0m", "systemd[0m"},
+		{strings.Repeat("é", 101), strings.Repeat("é", 100)},
+	} {
+		if got := shortDiagnostic(tc.input); got != tc.want || len(got) > 200 || !utf8.ValidString(got) {
+			t.Errorf("shortDiagnostic = %q, want %q", got, tc.want)
+		}
 	}
 }

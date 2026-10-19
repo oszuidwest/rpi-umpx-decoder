@@ -13,6 +13,9 @@ import (
 const maxOutbox = 128
 const explicitFaultChecks = 2
 
+// freshBaselineReason is routine after every start, reopen or polling gap.
+const freshBaselineReason = "no playback progress yet (fresh baseline)"
+
 var silenceSamples = regexp.MustCompile(`\b(\d+) samples silence played\b`)
 
 // errOutboxFull rejects a transition that needs a notification the queue cannot hold.
@@ -89,13 +92,13 @@ func (e *Engine) enqueue(s *State, now time.Time, subject, body string, incident
 	return nil
 }
 
-func (e *Engine) unknown(s *State, now time.Time) error {
+func (e *Engine) unknown(s *State, now time.Time, reason string) error {
 	s.Incident.CleanSince = time.Time{}
 	if s.UnknownSince.IsZero() {
 		s.UnknownSince = now
 	}
 	if !s.UnknownNoticed && now.Sub(s.UnknownSince) >= seconds(e.Config.UnknownSeconds) {
-		if err := e.enqueue(s, now, "[UNKNOWN] Decoder monitoring unavailable", "The watchdog cannot currently establish complete, current decoder observations. Check journal access/continuity, playback status, storage and watchdog logs. No audio recovery has been inferred.", 0); err != nil {
+		if err := e.enqueue(s, now, "[UNKNOWN] Decoder monitoring unavailable", "Reason: "+reason+"\n\nThe watchdog cannot currently establish complete, current decoder observations. Check journal access/continuity, playback status, storage and watchdog logs. No audio recovery has been inferred.", 0); err != nil {
 			return err
 		}
 		s.UnknownNoticed = true
@@ -104,9 +107,9 @@ func (e *Engine) unknown(s *State, now time.Time) error {
 }
 
 // Failed records uncertainty without clearing an existing decoder incident.
-func (e *Engine) Failed(s *State, now time.Time) error {
+func (e *Engine) Failed(s *State, now time.Time, reason string) error {
 	s.LastObserved = time.Time{}
-	return e.unknown(s, now)
+	return e.unknown(s, now, reason)
 }
 
 func (e *Engine) observed(s *State, now time.Time) error {
@@ -130,11 +133,8 @@ func (e *Engine) Step(s *State, p *Probe, now time.Time) error {
 	if !continuous || s.BootID != p.BootID {
 		s.ExplicitFaults = 0
 	}
-	uncertain := p.unverified()
+	p.Reason = p.unknownReason()
 	for _, record := range p.Records {
-		if strings.Contains(strings.ToLower(record.Message), "suppressed") {
-			uncertain = true
-		}
 		e.record(s, record, now)
 	}
 	progress, fault := e.playback(s, p, continuous)
@@ -143,8 +143,11 @@ func (e *Engine) Step(s *State, p *Probe, now time.Time) error {
 	}
 	// The current read can still report an incident while journal continuity is
 	// uncertain. Neither EOF nor ActiveState alone permits recovery.
-	if uncertain || (!progress && fault == "") {
-		if err := e.unknown(s, now); err != nil {
+	if p.Reason != "" || (!progress && fault == "") {
+		if p.Reason == "" {
+			p.Reason = "playback pointers have not both progressed yet"
+		}
+		if err := e.unknown(s, now, p.Reason); err != nil {
 			return err
 		}
 	} else if err := e.observed(s, now); err != nil {
@@ -193,11 +196,7 @@ func (e *Engine) playback(s *State, p *Probe, continuous bool) (progress bool, f
 	}
 	if fault != "" {
 		// The first explicit fault is unknown; pointer stalls are confirmed below.
-		s.ExplicitFaults = min(s.ExplicitFaults+1, explicitFaultChecks)
-		if s.ExplicitFaults < explicitFaultChecks {
-			return false, ""
-		}
-		return false, fault
+		return false, s.confirmFault(p, fault)
 	}
 	s.ExplicitFaults = 0
 	if p.PCM.Owner != p.MainPID {
@@ -205,6 +204,9 @@ func (e *Engine) playback(s *State, p *Probe, continuous bool) (progress bool, f
 	}
 	same := continuous && s.BootID == p.BootID && s.LastPID == p.MainPID && s.LastPCM.Owner == p.PCM.Owner && s.LastPCM.Trigger == p.PCM.Trigger && s.LastPCM.State == "RUNNING" && p.Monotonic > s.LastMonotonic
 	if !same {
+		if p.Reason == "" {
+			p.Reason = freshBaselineReason
+		}
 		s.Stalled = 0
 		return false, ""
 	}
@@ -219,6 +221,19 @@ func (e *Engine) playback(s *State, p *Probe, continuous bool) (progress bool, f
 	}
 	s.Stalled = 0
 	return true, ""
+}
+
+// confirmFault reports an explicit fault only once it has been seen on
+// consecutive polls; until then it is named as the reason for being unknown.
+func (s *State) confirmFault(p *Probe, fault string) string {
+	s.ExplicitFaults = min(s.ExplicitFaults+1, explicitFaultChecks)
+	if s.ExplicitFaults < explicitFaultChecks {
+		if p.Reason == "" {
+			p.Reason = fault + " (awaiting confirmation)"
+		}
+		return ""
+	}
+	return fault
 }
 
 func (e *Engine) record(s *State, record Record, now time.Time) {

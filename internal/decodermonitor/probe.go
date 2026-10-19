@@ -54,14 +54,40 @@ type Probe struct {
 	MainPID    int
 	PCM        PCM
 	Records    []Record
-	JournalErr error // journal unreadable; Gap is set and Bookmark is the input
-	StatusErr  error // systemctl failed; Active is "unknown"
+	JournalErr error  // journal unreadable; Gap is set and Bookmark is the input
+	StatusErr  error  // systemctl failed; Active is "unknown"
+	PCMErr     error  // kernel playback status unavailable
+	Reason     string // first check preventing complete current observations
 }
 
-func (p *Probe) unverified() bool {
-	return !p.CaughtUp || p.Gap || p.Active == "unknown" ||
-		p.PCM.State == "unavailable" ||
-		(p.Active == "active" && p.PCM.State == "RUNNING" && p.PCM.Owner != p.MainPID)
+func (p *Probe) unknownReason() string {
+	switch {
+	case p.JournalErr != nil:
+		return shortDiagnostic("journal unavailable: " + p.JournalErr.Error())
+	case p.Gap:
+		return "journal continuity lost; missing history cannot be reconstructed"
+	case !p.CaughtUp:
+		return "journal reader has not caught up"
+	}
+	for _, record := range p.Records {
+		if strings.Contains(strings.ToLower(record.Message), "suppressed") {
+			return "journal reported suppressed messages"
+		}
+	}
+	switch {
+	case p.StatusErr != nil:
+		return shortDiagnostic("decoder service status unavailable: " + p.StatusErr.Error())
+	case p.Active == "unknown":
+		return "decoder service status unknown"
+	case p.PCM.State == "unavailable":
+		if p.PCMErr != nil {
+			return shortDiagnostic("playback PCM unavailable: " + p.PCMErr.Error())
+		}
+		return "playback PCM unavailable"
+	case p.Active == "active" && p.PCM.State == "RUNNING" && p.PCM.Owner != p.MainPID:
+		return fmt.Sprintf("playback PCM owner PID %d differs from decoder MainPID %d", p.PCM.Owner, p.MainPID)
+	}
+	return ""
 }
 
 // Prober permits deterministic watchdog tests without opening audio devices.
@@ -97,7 +123,7 @@ func (p LocalProbe) Read(ctx context.Context, bookmark Bookmark) (Probe, error) 
 		return Probe{}, fmt.Errorf("invalid system uptime")
 	}
 	result.BootID = strings.TrimSpace(boot)
-	result.PCM = readPCM(root, p.PCMStatus)
+	result.PCM, result.PCMErr = readPCM(root, p.PCMStatus)
 	statusCtx, statusCancel := context.WithTimeout(ctx, 2*time.Second)
 	result.Active, result.MainPID, result.StatusErr = serviceStatus(statusCtx)
 	statusCancel()
@@ -276,32 +302,45 @@ func readProc(root *os.Root, name string) (string, error) {
 }
 
 // readPCM relies on root to keep path inside /proc; Config.Validate checks its shape.
-func readPCM(root *os.Root, path string) PCM {
+func readPCM(root *os.Root, path string) (PCM, error) {
 	unavailable := PCM{State: "unavailable"}
 	text, err := readProc(root, strings.TrimPrefix(path, "/proc/"))
 	if err != nil {
-		return unavailable
+		return unavailable, fmt.Errorf("PCM status %s: %w", path, err)
 	}
 	if strings.TrimSpace(text) == "closed" {
-		return PCM{State: "closed"}
+		return PCM{State: "closed"}, nil
 	}
 	fields := parseFields(text, ":")
 	owner, ownerErr := strconv.Atoi(fields["owner_pid"])
 	hardware, hardwareErr := strconv.ParseUint(fields["hw_ptr"], 10, 64)
 	applied, appliedErr := strconv.ParseUint(fields["appl_ptr"], 10, 64)
-	if ownerErr != nil || hardwareErr != nil || appliedErr != nil || owner <= 0 || fields["state"] == "" || fields["trigger_time"] == "" {
-		return unavailable
+	var invalid string
+	switch {
+	case ownerErr != nil || owner <= 0:
+		invalid = "owner_pid"
+	case hardwareErr != nil:
+		invalid = "hw_ptr"
+	case appliedErr != nil:
+		invalid = "appl_ptr"
+	case fields["state"] == "":
+		invalid = "state"
+	case fields["trigger_time"] == "":
+		invalid = "trigger_time"
+	}
+	if invalid != "" {
+		return unavailable, fmt.Errorf("PCM status %s: missing or invalid %s", path, invalid)
 	}
 	// owner_pid can be a thread; the service reports its process ID.
 	process, err := readProc(root, fmt.Sprintf("%d/status", owner))
 	if err != nil {
-		return unavailable
+		return unavailable, fmt.Errorf("PCM owner %d process status: %w", owner, err)
 	}
 	pid, err := strconv.Atoi(parseFields(process, ":")["Tgid"])
-	if err != nil {
-		return unavailable
+	if err != nil || pid <= 0 {
+		return unavailable, fmt.Errorf("PCM owner %d process status: missing or invalid Tgid", owner)
 	}
-	return PCM{State: fields["state"], Owner: pid, Trigger: fields["trigger_time"], Hardware: hardware, Applied: applied}
+	return PCM{State: fields["state"], Owner: pid, Trigger: fields["trigger_time"], Hardware: hardware, Applied: applied}, nil
 }
 
 func parseFields(text, separator string) map[string]string {
@@ -330,7 +369,12 @@ func (b *boundedBuffer) Write(data []byte) (int, error) {
 
 // firstLine returns a short, printable summary of the output for logs.
 func (b *boundedBuffer) firstLine() string {
-	line, _, _ := strings.Cut(b.buffer.String(), "\n")
+	return shortDiagnostic(b.buffer.String())
+}
+
+// shortDiagnostic accepts only local probe diagnostics, never mail/config errors.
+func shortDiagnostic(text string) string {
+	line, _, _ := strings.Cut(text, "\n")
 	line = strings.Map(func(r rune) rune {
 		if unicode.IsPrint(r) {
 			return r
