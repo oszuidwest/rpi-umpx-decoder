@@ -1,0 +1,52 @@
+name: Go watchdog
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          # This standard-library-only module deliberately has no go.sum.
+          cache: false
+
+      - name: Check module and formatting
+        run: |
+          go mod tidy
+          go mod verify
+          test -z "$(gofmt -l cmd internal)"
+          git diff --exit-code
+
+      - name: Test with race detection
+        run: go test -race -shuffle=on ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+          args: --timeout=5m
+
+      - name: Check vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./...
+
+      - name: Cross-build static Linux ARM64 watchdog
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: arm64
+        run: go build -o "$RUNNER_TEMP/micrompx-watchdog-linux-arm64" ./cmd/micrompx-watchdog
