@@ -10,7 +10,11 @@ import (
 	"time"
 )
 
-const maxOutbox = 128
+const (
+	maxOutbox       = 128
+	maxMailAttempts = 5
+	maxDeadLetters  = 32
+)
 
 var silenceSamples = regexp.MustCompile(`\b(\d+) samples silence played\b`)
 
@@ -45,6 +49,13 @@ type Mail struct {
 	IncidentID  uint64    `json:"incident_id,omitempty"`
 }
 
+// DeadLetter retains a mail removed from the outbox after permanent rejection.
+type DeadLetter struct {
+	Mail
+	Status int       `json:"status"`
+	Failed time.Time `json:"failed"`
+}
+
 // State includes both transport incidents and separate monitoring uncertainty.
 // The playback baseline is not persisted: after a restart the first poll is
 // never continuous, so the watchdog starts from a fresh baseline.
@@ -63,6 +74,9 @@ type State struct {
 	UnknownNoticed bool        `json:"unknown_noticed"`
 	NextID         uint64      `json:"next_id"`
 	Outbox         []Mail      `json:"outbox"`
+
+	DeadLetters          []DeadLetter `json:"dead_letters,omitempty"`
+	MailCredentialFailed bool         `json:"mail_credential_failed,omitempty"`
 }
 
 // Engine contains no I/O.

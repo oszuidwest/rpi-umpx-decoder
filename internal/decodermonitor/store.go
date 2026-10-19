@@ -110,7 +110,7 @@ func (s *Store) load() (State, error) {
 		return State{}, fmt.Errorf("watchdog state: %w", err)
 	}
 	var state State
-	if err := json.Unmarshal(data, &state); err != nil || state.Version != 1 || len(state.Outbox) > maxOutbox {
+	if err := json.Unmarshal(data, &state); err != nil || state.Version != 1 || len(state.Outbox) > maxOutbox || len(state.DeadLetters) > maxDeadLetters {
 		return State{}, fmt.Errorf("watchdog state is corrupt or unsupported; refusing to discard it")
 	}
 	return state, nil
@@ -129,6 +129,7 @@ func (s *Store) current() (State, error) {
 	}
 	state := s.state
 	state.Recent, state.Outbox = slices.Clone(s.state.Recent), slices.Clone(s.state.Outbox)
+	state.DeadLetters = slices.Clone(s.state.DeadLetters)
 	return state, nil
 }
 
