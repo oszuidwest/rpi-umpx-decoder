@@ -1,6 +1,7 @@
 package decodermonitor
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -12,6 +13,9 @@ import (
 const maxOutbox = 128
 
 var silenceSamples = regexp.MustCompile(`\b(\d+) samples silence played\b`)
+
+// errOutboxFull rejects a transition that needs a notification the queue cannot hold.
+var errOutboxFull = errors.New("watchdog outbox is full; cursor was not advanced")
 
 // Incident is persisted with the cursor and notifications in one state commit.
 type Incident struct {
@@ -71,7 +75,7 @@ func (s *State) observing() bool { return s.UnknownSince.IsZero() }
 
 func (e *Engine) enqueue(s *State, now time.Time, subject, body string, incidentID uint64) error {
 	if len(s.Outbox) >= maxOutbox {
-		return fmt.Errorf("watchdog outbox is full; cursor was not advanced")
+		return errOutboxFull
 	}
 	id := s.nextID()
 	s.Outbox = append(s.Outbox, Mail{

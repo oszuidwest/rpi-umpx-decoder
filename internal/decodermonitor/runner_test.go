@@ -162,6 +162,13 @@ func TestReadyRequiresCurrentObservation(t *testing.T) {
 			t.Errorf("%s: ready=%v, want %v", tc.name, got, tc.want)
 		}
 	}
+	if err := store.Update(nil, at, func(s *State) error { *s = State{Version: 1, LastObserved: at}; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	r.blocked = true
+	if r.ready(at) {
+		t.Error("heartbeat allowed right after a poll that could not be committed")
+	}
 }
 
 type shutdownSender struct{ cancel context.CancelFunc }
@@ -219,4 +226,48 @@ func TestPollCommitsEvidenceAndAdvancesTheBookmark(t *testing.T) {
 	if err != nil || len(entries) != 3 {
 		t.Fatalf("records were not committed as evidence: %d %v", len(entries), err)
 	}
+}
+
+type faultProbe struct {
+	reads  int
+	cancel context.CancelFunc
+}
+
+func (p *faultProbe) Read(_ context.Context, _ Bookmark) (Probe, error) {
+	p.reads++
+	if p.reads == 3 {
+		p.cancel()
+	}
+	probe := *healthyProbe(time.Now(), 0)
+	probe.Active = "inactive"
+	return probe, nil
+}
+
+func TestFullOutboxDoesNotStopObservation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg, store := testStore(t)
+		cfg.SendMail = true
+		at := time.Now()
+		if err := store.Update(nil, at, func(s *State) error {
+			for i := range maxOutbox {
+				s.Outbox = append(s.Outbox, Mail{ID: uint64(i) + 1, Created: at, NextAttempt: at.Add(time.Hour)})
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		probe := &faultProbe{cancel: cancel}
+		r := Runner{Config: cfg, Store: store, Probe: probe, Sender: &fakeSender{}}
+		if err := r.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("full outbox ended observation: %v", err)
+		}
+		if r.ready(time.Now()) {
+			t.Fatal("heartbeat allowed while observations cannot be committed")
+		}
+		s, err := store.Snapshot()
+		if err != nil || probe.reads != 3 || s.Incident.ID != 0 || len(s.Outbox) != maxOutbox {
+			t.Fatalf("full outbox committed or dropped state: reads=%d incident=%+v outbox=%d %v", probe.reads, s.Incident, len(s.Outbox), err)
+		}
+	})
 }

@@ -23,6 +23,8 @@ type Runner struct {
 	Store  *Store
 	Probe  Prober
 	Sender Sender
+
+	blocked bool // the last poll could not queue a notification
 }
 
 // Run owns and joins its worker. Errors stop only the watchdog, never MicroMPX.
@@ -42,9 +44,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return nil
 		}
-		if err := r.poll(ctx); err != nil {
+		err := r.poll(ctx)
+		// A full queue waits for delivery instead of ending observation: the
+		// cursor stays put, the heartbeat stops, and the backlog is processed
+		// once mail drains.
+		if err != nil && !errors.Is(err, errOutboxFull) {
 			return err
 		}
+		if errors.Is(err, errOutboxFull) && !r.blocked {
+			slog.Error("watchdog outbox is full; observation waits for mail delivery", "limit", maxOutbox)
+		}
+		r.blocked = errors.Is(err, errOutboxFull)
 		now := time.Now()
 		if now.Sub(pruned) >= time.Hour {
 			// Retention is housekeeping: a failure must not end observation.
@@ -90,7 +100,7 @@ func (r *Runner) poll(ctx context.Context) error {
 	if probe.StatusErr != nil && state.observing() {
 		slog.Warn("watchdog decoder service status unavailable", "error", probe.StatusErr)
 	}
-	if probe.JournalErr == nil && probe.Gap {
+	if probe.JournalErr == nil && probe.Gap && !r.blocked {
 		slog.Warn("watchdog journal continuity lost; missing history cannot be reconstructed", "caught_up", probe.CaughtUp)
 	}
 	return r.Store.Update(probe.Records, now, func(s *State) error {
@@ -170,6 +180,9 @@ func (r *Runner) deliver(ctx context.Context, now time.Time) error {
 }
 
 func (r *Runner) ready(now time.Time) bool {
+	if r.blocked {
+		return false // the last poll's observation was not committed
+	}
 	s, err := r.Store.Snapshot()
 	if err != nil || !s.observing() || s.LastObserved.IsZero() || now.Sub(s.LastObserved) > 2*seconds(r.Config.PollSeconds) {
 		return false
