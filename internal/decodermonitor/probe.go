@@ -80,15 +80,21 @@ func (p *Probe) unknownReason() string {
 		return shortDiagnostic("decoder service status unavailable: " + p.StatusErr.Error())
 	case p.Active == "unknown":
 		return "decoder service status unknown"
-	case p.PCM.State == "unavailable":
-		if p.PCMErr != nil {
-			return shortDiagnostic("playback PCM unavailable: " + p.PCMErr.Error())
-		}
-		return "playback PCM unavailable"
-	case p.Active == "active" && p.PCM.State == "RUNNING" && p.PCM.Owner != p.MainPID:
-		return fmt.Sprintf("playback PCM owner PID %d differs from decoder MainPID %d", p.PCM.Owner, p.MainPID)
 	}
-	return ""
+	var pcm string
+	switch {
+	case p.PCM.State == "unavailable" && p.PCMErr != nil:
+		pcm = "playback PCM unavailable: " + p.PCMErr.Error()
+	case p.PCM.State == "unavailable":
+		pcm = "playback PCM unavailable"
+	case p.Active == "active" && p.PCM.State == "RUNNING" && p.PCM.Owner != p.MainPID:
+		pcm = fmt.Sprintf("playback PCM owner PID %d differs from decoder MainPID %d", p.PCM.Owner, p.MainPID)
+	}
+	// The same probe can confirm a service fault, so name that first.
+	if pcm != "" && (p.Active != "active" || p.MainPID <= 0) {
+		pcm = "decoder service is not active; " + pcm
+	}
+	return shortDiagnostic(pcm)
 }
 
 // Prober permits deterministic watchdog tests without opening audio devices.

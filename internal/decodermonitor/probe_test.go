@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -228,6 +229,29 @@ func TestParseServiceStatus(t *testing.T) {
 			active, pid, entered, err := parseServiceStatus(tc.output)
 			if (err != nil) != (tc.active == "") || active != tc.active || pid != tc.pid || entered != tc.entered {
 				t.Fatalf("status = %q, %d, %f, %v", active, pid, entered, err)
+			}
+		})
+	}
+}
+
+func TestUnknownReasonNamesServiceFaultBeforePCM(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		change func(*Probe)
+		want   string
+	}{
+		{"inactive_unavailable", func(p *Probe) { p.Active, p.MainPID, p.PCM = "inactive", 0, PCM{State: "unavailable"} }, "decoder service is not active; playback PCM unavailable"},
+		{"no_mainpid_foreign_owner", func(p *Probe) { p.MainPID, p.PCM.Owner = 0, 321 }, "decoder service is not active; playback PCM owner PID 321 differs from decoder MainPID 0"},
+		{"active_unavailable", func(p *Probe) { p.PCM = PCM{State: "unavailable"} }, "playback PCM unavailable"},
+		{"healthy", func(*Probe) {}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := healthyProbe(time.Now(), 0)
+			tc.change(p)
+			if got := p.unknownReason(); got != tc.want {
+				t.Fatalf("reason = %q, want %q", got, tc.want)
 			}
 		})
 	}
