@@ -86,7 +86,7 @@ The journal cursor remains opaque. Reads request only `MESSAGE` and the identity
 
 Without a saved bookmark, or after a continuity gap, only the last minute of journal is read; records from that minute that were already processed are counted again. Stored bookmarks resume from the last committed entry after restart. Reads process at most 512 new records per batch; a partial read is not current. Historical impact becomes a retrospective summary once caught up, not a storm of live alerts. If logs have already rotated/vacuumed or disappeared on reboot, lost history cannot be reconstructed. A gap is logged as a warning; it is mailed only if monitoring stays uncertain for `unknown_seconds`.
 
-Journald remains the source of journal records; the watchdog does not copy batches into evidence files. Each incident stores the cursor of its first journal impact record once, including when a kernel fault opened the incident before any journal impact. Incident notifications with that cursor include a ready-to-run export hint:
+Journald remains the source of journal records; the watchdog does not copy batches into evidence files. Each incident stores the cursor of its first journal impact record once, including when a kernel fault opened the incident before any journal impact. Incident notifications with that cursor, and the recovery notification that closes the incident, include a ready-to-run export hint:
 
 ```sh
 journalctl -u micrompx.service --cursor='<cursor>'

@@ -166,7 +166,9 @@ func (e *Engine) recover(s *State, now time.Time, playbackOK bool) error {
 	if now.Sub(s.Incident.CleanSince) < seconds(e.Config.RecoverySeconds) {
 		return nil
 	}
-	body := fmt.Sprintf("Incident %d: no new decoder-impact messages during %s of current observations, with playback pointers progressing. Last impact: %s.\nThis is not a measurement of RF or programme audio.", s.Incident.ID, seconds(e.Config.RecoverySeconds), s.Incident.LastImpact.Format(time.RFC3339))
+	body := fmt.Sprintf("Incident %d: no new decoder-impact messages during %s of current observations, with playback pointers progressing. Last impact: %s.\nThis is not a measurement of RF or programme audio.\n", s.Incident.ID, seconds(e.Config.RecoverySeconds), s.Incident.LastImpact.Format(time.RFC3339))
+	// The cursor can appear after the last notice, so recovery repeats it.
+	body += exportHint(s.Incident.FirstJournalCursor)
 	if err := e.enqueue(s, now, "[RECOVERY] Decoder impact observations cleared", body, 0); err != nil {
 		return err
 	}
@@ -257,6 +259,14 @@ func (e *Engine) impact(s *State, when time.Time, severity, reason string, histo
 	s.Incident.CleanSince = time.Time{}
 }
 
+// exportHint is a shell-quoted command that exports the incident's journal records.
+func exportHint(cursor string) string {
+	if cursor == "" {
+		return ""
+	}
+	return "Export journal records:\njournalctl -u micrompx.service --cursor='" + strings.ReplaceAll(cursor, "'", "'\\''") + "'\n"
+}
+
 func (e *Engine) notice(s *State, caughtUp bool, now time.Time) error {
 	i := &s.Incident
 	if i.ID == 0 || (!caughtUp && i.Historical) {
@@ -275,9 +285,7 @@ func (e *Engine) notice(s *State, caughtUp bool, now time.Time) error {
 		label = "REMINDER " + label
 	}
 	body := fmt.Sprintf("Incident %d\nReason: %s\nFirst impact: %s\nLast impact: %s\nImpact log records: %d (not independent physical dropouts)\nSeverity: %s\n", i.ID, i.Reason, i.Opened.Format(time.RFC3339), i.LastImpact.Format(time.RFC3339), i.Records, i.Severity)
-	if i.FirstJournalCursor != "" {
-		body += "Export journal records:\njournalctl -u micrompx.service --cursor='" + strings.ReplaceAll(i.FirstJournalCursor, "'", "'\\''") + "'\n"
-	}
+	body += exportHint(i.FirstJournalCursor)
 	if err := e.enqueue(s, now, "["+label+"] MicroMPX decoder incident", body, i.ID); err != nil {
 		return err
 	}

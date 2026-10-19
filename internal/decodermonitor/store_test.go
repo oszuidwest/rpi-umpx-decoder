@@ -355,3 +355,44 @@ func checkIncidentCursorNotice(t *testing.T, s *State, cursor, hint string) {
 		t.Fatalf("notice lacks the first impact's export command %q: %s", hint, body)
 	}
 }
+
+func TestRecoveryRepeatsJournalExportHint(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultConfig()
+	cfg.Site = "Test"
+	e, s := Engine{cfg}, State{Version: 1}
+	at := time.Now()
+	// A kernel fault opens the incident; its notice is still queued when a
+	// journal impact sets the cursor, so no incident notice carries the hint.
+	for i := range 2 {
+		now := at.Add(time.Duration(i) * 10 * time.Second)
+		p := healthyProbe(now, 0)
+		p.PCM.State = "XRUN"
+		advance(t, &e, &s, p, now)
+	}
+	now := at.Add(20 * time.Second)
+	p := healthyProbe(now, 0)
+	record := impactRecord(now)
+	record.Cursor = "s=late"
+	p.Records = []Record{record}
+	advance(t, &e, &s, p, now)
+	for i := 3; ; i++ {
+		now := at.Add(time.Duration(i) * 10 * time.Second)
+		advance(t, &e, &s, healthyProbe(now, uint64(i)*1920000), now)
+		if s.Incident.ID == 0 {
+			break
+		}
+		if i > 200 {
+			t.Fatal("incident never recovered")
+		}
+	}
+	last := s.Outbox[len(s.Outbox)-1]
+	if !strings.HasPrefix(last.Subject, "[RECOVERY]") || !strings.Contains(last.Body, "journalctl -u micrompx.service --cursor='s=late'\n") {
+		t.Fatalf("recovery lacks the export command: %+v", last)
+	}
+	for _, mail := range s.Outbox[:len(s.Outbox)-1] {
+		if strings.Contains(mail.Body, "s=late") {
+			t.Fatalf("scenario not reached: an incident notice already carried the hint: %s", mail.Subject)
+		}
+	}
+}
