@@ -2,7 +2,9 @@
 
 `cmd/micrompx-watchdog` runs **on each MicroMPX decoder Pi**, not on a new middleware host. It uses the same Microsoft Graph client-credentials approach and credential-file fields as `zwfm-encoder` (without its `events` field), but is self-contained in this decoder repository. It does not import, install or start the encoder application. There is no SSH collector, database server, SQLite, Python, CGO or third-party Go module dependency; the watchdog uses only the Go standard library.
 
-It observes and sends notifications only. It never restarts/stops/starts the decoder, sends signals to it, changes its settings, opens a playback device or injects test audio. The example service also has `Restart=no` for the watchdog itself.
+It observes and sends notifications only. It never restarts/stops/starts the decoder, sends signals to it, changes its settings, opens a playback device or injects test audio.
+
+The example service uses `Restart=on-failure` for the watchdog itself, with a ten-second delay and at most three starts within five minutes. Normal stops (including SIGTERM/cancellation, exit 0) and `-help` (exit 0) are not restarted; runtime/configuration errors (exit 1) and usage errors (exit 2) are retried. After the start limit is hit, the watchdog stays stopped even when the interval elapses; the optional heartbeat then expires. After fixing the cause, run `sudo systemctl reset-failed micrompx-watchdog.service` and `sudo systemctl start micrompx-watchdog.service` to resume monitoring.
 
 Background: [decoder incident and evidence, 19 October 2026](https://github.com/oszuidwest/rpi-umpx-decoder/issues/23).
 
@@ -57,7 +59,7 @@ The config and M365 files must be regular files without group or other permissio
 
 ## Configuration
 
-Only `site` is required in preview mode; omitted values take the defaults in the table. Unknown or case-variant fields, duplicate JSON keys, out-of-range bounds and group/other-accessible files are rejected. `null` means the zero value, so it is only accepted where that is valid, such as `send_mail`. There are no automatic restart/reset options.
+Only `site` is required in preview mode; omitted values take the defaults in the table. Unknown or case-variant fields, duplicate JSON keys, out-of-range bounds and group/other-accessible files are rejected. `null` means the zero value, so it is only accepted where that is valid, such as `send_mail`. There are no automatic decoder restart/reset options.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -92,7 +94,7 @@ Full scoped messages are stored in private, content-addressed evidence batch fil
 
 An exclusive OS lock prevents two watchdogs sharing the same directory. Each private directory has one `.watchdog.tmp` transaction file name; a file left by an interrupted write is removed and recreated by the next write. Evidence retention only removes owned hash-named batch files inside the dedicated evidence directory; age and quota pruning are logged. This is bounded operational retention, not an indefinite forensic archive. Export incident evidence promptly before retention expires and sanitize it before sharing. Files and directories it creates are 0600 and 0700. Each new journal batch is synced. The compact state is only rewritten when the cursor, incident, outbox or monitoring status changes, not on every quiet poll; the playback baseline and the unknown-monitoring grace period are kept in memory and rebuilt after a restart or a failed state write.
 
-The outbox is capped at 128 entries. A rejected mail, including a permanent 4xx, is retried indefinitely (at most 256 seconds apart, longer if `Retry-After` asks) and holds back later mail; the HTTP status is logged. Full queues or storage failures fail closed without advancing the journal cursor. With a full queue the watchdog keeps running and delivering: the heartbeat stops, and the journal backlog after the saved cursor is processed once mail drains. Without a saved cursor (first start or after a continuity gap) only the last minute is re-read, so older records can be missed while the queue stays full. A failed state or evidence commit during a poll stops the watchdog, allowing the external heartbeat to expire; failed mail-state updates and hourly retention passes are logged and retried. Recover disk/credentials and, after a stop, manually resume the watchdog. Never delete its state to hide a pending incident. State contains no M365 credentials. Local raw log messages can nevertheless contain sensitive operational data.
+The outbox is capped at 128 entries. A rejected mail, including a permanent 4xx, is retried indefinitely (at most 256 seconds apart, longer if `Retry-After` asks) and holds back later mail; the HTTP status is logged. Full queues or storage failures fail closed without advancing the journal cursor. With a full queue the watchdog keeps running and delivering: the heartbeat stops, and the journal backlog after the saved cursor is processed once mail drains. Without a saved cursor (first start or after a continuity gap) only the last minute is re-read, so older records can be missed while the queue stays full. A failed state or evidence commit during a poll stops the watchdog; the example service retries it subject to the start limit above, while failed mail-state updates and hourly retention passes are logged and retried. Recover disk/credentials and, if the start limit was hit, reset the failed watchdog unit and start it again; while it stays stopped, the optional heartbeat expires. Never delete its state to hide a pending incident. State contains no M365 credentials. Local raw log messages can nevertheless contain sensitive operational data.
 
 ## M365 and independent failure detection
 
