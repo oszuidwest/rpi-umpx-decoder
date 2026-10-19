@@ -1,6 +1,7 @@
 package decodermonitor
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -50,7 +51,7 @@ func TestEngineImpactEscalationAndNoFalseRecovery(t *testing.T) {
 	if s.Incident.ID == 0 {
 		t.Fatal("six-minute gap falsely cleared the incident")
 	}
-	if err := e.Failed(&s, at.Add(410*time.Second)); err != nil {
+	if err := e.Failed(&s, at.Add(410*time.Second), "probe read failed"); err != nil {
 		t.Fatal(err)
 	}
 	for i := 42; i <= 50; i++ {
@@ -271,7 +272,7 @@ func TestEngineExplicitFaultsRequireContinuousPolls(t *testing.T) {
 			return at.Add(10 * time.Second)
 		}},
 		{"failed_read", func(t *testing.T, e *Engine, s *State, at time.Time) time.Time {
-			if err := e.Failed(s, at); err != nil {
+			if err := e.Failed(s, at, "probe read failed"); err != nil {
 				t.Fatal(err)
 			}
 			return at.Add(10 * time.Second)
@@ -485,4 +486,80 @@ func ExampleEngine() {
 	err := engine.Step(&s, p, now.Add(10*time.Second))
 	fmt.Println(err, s.Incident.Severity, s.Outbox[0].Preview)
 	// Output: <nil> critical true
+}
+
+func TestEngineUnknownReasonInMail(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		change     func(*Probe, *State)
+	}{
+		{"journal_error_first", "journal unavailable: permission denied", func(p *Probe, _ *State) {
+			p.JournalErr, p.Gap, p.CaughtUp = errors.New("permission denied\nmore detail"), true, false
+			p.StatusErr, p.PCMErr = errors.New("systemctl failed"), errors.New("PCM failed")
+			p.Active, p.PCM.State = "unknown", "unavailable"
+		}},
+		{"gap_first", "journal continuity lost; missing history cannot be reconstructed", func(p *Probe, _ *State) {
+			p.Gap, p.CaughtUp, p.Active = true, false, "unknown"
+		}},
+		{"backlog_first", "journal reader has not caught up", func(p *Probe, _ *State) {
+			p.CaughtUp, p.Active = false, "unknown"
+		}},
+		{"suppressed_first", "journal reported suppressed messages", func(p *Probe, _ *State) {
+			p.Records = []Record{{Message: "Suppressed messages with private operational data"}}
+			p.Active = "unknown"
+		}},
+		{"systemctl_error", "decoder service status unavailable: systemctl failed", func(p *Probe, _ *State) {
+			p.Active, p.StatusErr = "unknown", errors.New("systemctl failed")
+		}},
+		{"systemctl_unknown", "decoder service status unknown", func(p *Probe, _ *State) { p.Active = "unknown" }},
+		{"pcm_error", "playback PCM unavailable: /proc/asound/card/pcm0p/sub0/status: permission denied", func(p *Probe, _ *State) {
+			p.PCM.State, p.PCMErr = "unavailable", errors.New("/proc/asound/card/pcm0p/sub0/status: permission denied")
+		}},
+		{"pcm_unavailable", "playback PCM unavailable", func(p *Probe, _ *State) { p.PCM.State = "unavailable" }},
+		{"owner_mismatch", "playback PCM owner PID 321 differs from decoder MainPID 100", func(p *Probe, _ *State) { p.PCM.Owner = 321 }},
+		{"fresh_baseline", "no playback progress yet (fresh baseline)", func(_ *Probe, s *State) { s.LastObserved = time.Time{} }},
+		{"pending_progress", "playback pointers have not both progressed yet", func(p *Probe, s *State) { p.PCM.Applied = s.LastPCM.Applied }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := DefaultConfig()
+			cfg.Site = "Test"
+			e, s := Engine{cfg}, State{Version: 1}
+			at := time.Now()
+			advance(t, &e, &s, healthyProbe(at, 0), at)
+			at = at.Add(10 * time.Second)
+			p := healthyProbe(at, 1920000)
+			tc.change(p, &s)
+			s.UnknownSince = at.Add(-seconds(cfg.UnknownSeconds))
+			advance(t, &e, &s, p, at)
+			if p.Reason != tc.want || s.observing() || len(s.Outbox) != 1 || !strings.HasPrefix(s.Outbox[0].Subject, "[UNKNOWN]") || !strings.Contains(s.Outbox[0].Body, "Reason: "+tc.want+"\n") {
+				t.Fatalf("unknown reason missing or inconsistent: reason=%q mail=%+v", p.Reason, s.Outbox)
+			}
+		})
+	}
+}
+
+func TestEngineReasonNamesFaultAwaitingConfirmation(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, want string
+		change     func(*Probe)
+	}{
+		{"service", "decoder service is not active (awaiting confirmation)", func(p *Probe) { p.Active = "inactive" }},
+		{"pcm", "playback PCM is not running (closed) (awaiting confirmation)", func(p *Probe) { p.PCM.State = "closed" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := DefaultConfig()
+			cfg.Site = "Test"
+			e, s := Engine{cfg}, State{Version: 1}
+			at := time.Now()
+			p := healthyProbe(at, 0)
+			tc.change(p)
+			advance(t, &e, &s, p, at)
+			if p.Reason != tc.want || s.Incident.ID != 0 {
+				t.Fatalf("first explicit fault: reason=%q incident=%+v", p.Reason, s.Incident)
+			}
+		})
+	}
 }

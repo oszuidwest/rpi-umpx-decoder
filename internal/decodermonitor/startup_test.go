@@ -32,8 +32,9 @@ func TestEngineStartupGrace(t *testing.T) {
 					t.Fatalf("startup became an incident or health at poll %d: %+v", i, s)
 				}
 			}
-			if len(s.Outbox) != 1 || !strings.HasPrefix(s.Outbox[0].Subject, "[UNKNOWN]") {
-				t.Fatalf("startup uncertainty not reported as unknown: %+v", s.Outbox)
+			if len(s.Outbox) != 1 || !strings.HasPrefix(s.Outbox[0].Subject, "[UNKNOWN]") ||
+				!strings.Contains(s.Outbox[0].Body, "Reason: decoder starting (") {
+				t.Fatalf("startup uncertainty not explained: %+v", s.Outbox)
 			}
 		})
 	}
@@ -218,7 +219,7 @@ func TestEngineRestartRequiresKnownPreviousPID(t *testing.T) {
 			return at
 		}},
 		{"failed_poll", func(t *testing.T, e *Engine, s *State, _ *Probe, at time.Time) time.Time {
-			if err := e.Failed(s, at); err != nil {
+			if err := e.Failed(s, at, "probe read failed"); err != nil {
 				t.Fatal(err)
 			}
 			return at.Add(10 * time.Second)

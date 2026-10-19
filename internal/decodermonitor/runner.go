@@ -24,7 +24,8 @@ type Runner struct {
 	Probe  Prober
 	Sender Sender
 
-	blocked bool // the last poll could not queue a notification
+	blocked    bool   // the last poll could not queue a notification
+	lastReason string // only committed polls; a restart logs the current reason again
 }
 
 // Run owns and joins its worker. Errors stop only the watchdog, never MicroMPX.
@@ -91,26 +92,26 @@ func (r *Runner) poll(ctx context.Context) error {
 	// Diagnostics follow a committed transition, so a poll rejected by a full
 	// outbox neither repeats nor loses them.
 	if probeErr != nil {
-		err := r.Store.Update(nil, now, func(s *State) error { return engine.Failed(s, now) })
-		if err == nil && state.observing() {
-			slog.Warn("watchdog decoder observation unavailable", "error", probeErr)
+		probe.Reason = shortDiagnostic("probe read failed: " + probeErr.Error())
+		err = r.Store.Update(nil, now, func(s *State) error { return engine.Failed(s, now, probe.Reason) })
+	} else {
+		err = r.Store.Update(probe.Records, now, func(s *State) error {
+			return engine.Step(s, &probe, now)
+		})
+	}
+	if err != nil {
+		return err
+	}
+	if probe.Reason != r.lastReason {
+		switch probe.Reason {
+		case "":
+		case freshBaselineReason:
+			slog.Info("watchdog establishing playback baseline")
+		default:
+			slog.Warn("watchdog decoder observation unavailable", "reason", probe.Reason)
 		}
-		return err
 	}
-	if err := r.Store.Update(probe.Records, now, func(s *State) error {
-		return engine.Step(s, &probe, now)
-	}); err != nil {
-		return err
-	}
-	if probe.JournalErr != nil && state.observing() {
-		slog.Warn("watchdog journal unavailable; kernel playback checks remain active", "error", probe.JournalErr)
-	}
-	if probe.StatusErr != nil && state.observing() {
-		slog.Warn("watchdog decoder service status unavailable", "error", probe.StatusErr)
-	}
-	if probe.JournalErr == nil && probe.Gap {
-		slog.Warn("watchdog journal continuity lost; missing history cannot be reconstructed", "caught_up", probe.CaughtUp)
-	}
+	r.lastReason = probe.Reason
 	return nil
 }
 

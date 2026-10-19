@@ -308,16 +308,15 @@ func TestJournalGapIsLoggedWhenItsObservationCommits(t *testing.T) {
 	}
 	probe := &gapProbe{inactive: true}
 	r := Runner{Config: cfg, Store: store, Probe: probe}
+	// The first fault is unknown and commits, so its gap is logged once.
 	if err := r.poll(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	logs.Reset() // The first fault is unknown and commits; only confirmation needs mail.
+	checkLogCount(t, &logs, "continuity lost", 1)
 	if err := r.poll(t.Context()); !errors.Is(err, errOutboxFull) {
 		t.Fatalf("expected a rejected poll: %v", err)
 	}
-	if strings.Contains(logs.String(), "continuity lost") {
-		t.Fatal("gap logged for an observation that was not committed")
-	}
+	checkLogCount(t, &logs, "continuity lost", 1)
 	if err := store.Update(nil, at, func(s *State) error { s.Outbox = nil; return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +325,118 @@ func TestJournalGapIsLoggedWhenItsObservationCommits(t *testing.T) {
 	if err := r.poll(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(logs.String(), "continuity lost"); got != 1 {
-		t.Fatalf("committed gap logged %d times", got)
+	// The unchanged reason is not repeated once observations commit again.
+	checkLogCount(t, &logs, "continuity lost", 1)
+}
+
+type unavailableProbe struct {
+	probe Probe
+	err   error
+}
+
+func (p *unavailableProbe) Read(context.Context, Bookmark) (Probe, error) { return p.probe, p.err }
+
+// Not parallel: it captures the process-wide default logger.
+func TestUnknownReasonLoggedAfterCommitAndRestart(t *testing.T) {
+	var logs strings.Builder
+	previous, writer, flags := slog.Default(), log.Writer(), log.Flags()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+		log.SetOutput(writer)
+		log.SetFlags(flags)
+	})
+	for _, failed := range []bool{false, true} {
+		t.Run(fmt.Sprint("probe_read_error=", failed), func(t *testing.T) {
+			logs.Reset()
+			cfg, store := testStore(t)
+			probe := &unavailableProbe{probe: *healthyProbe(time.Now(), 0)}
+			setReason := func(cause string) string {
+				if failed {
+					probe.err = errors.New(cause + "\r\nunwanted diagnostic line")
+					return "probe read failed: " + cause
+				}
+				probe.probe.Active, probe.probe.StatusErr = "unknown", errors.New(cause+"\r\nunwanted diagnostic line")
+				return "decoder service status unavailable: " + cause
+			}
+			reason := setReason("permission denied")
+			// Persisted uncertainty must not suppress the first log after startup.
+			if err := store.Update(nil, time.Now(), func(s *State) error { s.UnknownNoticed = true; return nil }); err != nil {
+				t.Fatal(err)
+			}
+			r := Runner{Config: cfg, Store: store, Probe: probe}
+			poll := func(want string, count int) {
+				t.Helper()
+				if err := r.poll(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if got := strings.Count(logs.String(), "level=WARN msg=\"watchdog decoder observation unavailable\""); got != count || !strings.Contains(logs.String(), want) || strings.Contains(logs.String(), "unwanted diagnostic line") {
+					t.Fatalf("reason log count=%d, want %d containing %q: %s", got, count, want, logs.String())
+				}
+			}
+			poll(reason, 1)
+			poll(reason, 1)
+			reason = setReason("read timed out")
+			poll(reason, 2)
+			poll(reason, 2)
+			at := time.Now()
+			if err := store.Update(nil, at, func(s *State) error {
+				s.UnknownNoticed, s.UnknownSince = false, at.Add(-time.Hour)
+				for i := range maxOutbox {
+					s.Outbox = append(s.Outbox, Mail{ID: uint64(i) + 1})
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			reason = setReason("kernel status unavailable")
+			before := logs.String()
+			if err := r.poll(t.Context()); !errors.Is(err, errOutboxFull) {
+				t.Fatalf("expected rejected poll: %v", err)
+			}
+			if logs.String() != before {
+				t.Fatal("rejected observation logged a reason")
+			}
+			if err := store.Update(nil, at, func(s *State) error { s.Outbox = nil; return nil }); err != nil {
+				t.Fatal(err)
+			}
+			poll(reason, 3)
+			s, err := store.Snapshot()
+			if err != nil || len(s.Outbox) != 1 || !strings.HasPrefix(s.Outbox[0].Subject, "[UNKNOWN]") || !strings.Contains(s.Outbox[0].Body, "Reason: "+reason+"\n") || strings.Contains(s.Outbox[0].Body, "unwanted diagnostic line") {
+				t.Fatalf("committed reason absent from unknown mail: %+v %v", s.Outbox, err)
+			}
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := OpenStore(&cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = reopened.Close() })
+			r = Runner{Config: cfg, Store: reopened, Probe: probe}
+			poll(reason, 4)
+			poll(reason, 4)
+			// Complete observations clear deduplication, allowing a recurrence.
+			at = time.Now()
+			probe.err, probe.probe = nil, *healthyProbe(at, 0)
+			probe.probe.PCM.Trigger = "resumed"
+			// A fresh baseline is routine: logged once per baseline at info level.
+			poll("playback baseline", 4)
+			probe.probe = *healthyProbe(at.Add(time.Second), 1920000)
+			probe.probe.PCM.Trigger = "resumed"
+			poll("playback baseline", 4)
+			probe.probe.PCM.Trigger = "reopened"
+			poll("playback baseline", 4)
+			checkLogCount(t, &logs, "level=INFO msg=\"watchdog establishing playback baseline\"", 2)
+			reason = setReason("kernel status unavailable")
+			poll(reason, 5)
+		})
+	}
+}
+
+func checkLogCount(t *testing.T, logs *strings.Builder, line string, want int) {
+	t.Helper()
+	if got := strings.Count(logs.String(), line); got != want {
+		t.Fatalf("%d log lines %q, want %d: %s", got, line, want, logs.String())
 	}
 }
