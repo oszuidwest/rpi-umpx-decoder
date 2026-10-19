@@ -62,3 +62,14 @@ func TestConfigRejectsMissingPublicAndOversizeFiles(t *testing.T) {
 		t.Fatal("oversize config accepted")
 	}
 }
+
+func TestConfigRejectsRemovedEvidenceSettings(t *testing.T) {
+	for _, field := range []string{"retention_days", "evidence_mib"} {
+		t.Run(field, func(t *testing.T) {
+			t.Parallel()
+			if _, err := LoadConfig(privateConfig(t, `{"site":"Test","`+field+`":7}`)); err == nil || !strings.Contains(err.Error(), "unknown fields") {
+				t.Fatalf("removed setting was not rejected as unknown: %v", err)
+			}
+		})
+	}
+}

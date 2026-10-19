@@ -50,7 +50,10 @@ If you enable heartbeat monitoring during installation, the system will perform 
 For M365 email alerts about logged buffer starvation, inserted silence or stalled
 primary MPX playback, see the [local MicroMPX watchdog](docs/micrompx-watchdog.md).
 It runs independently on each decoder Pi, uses only the Go standard library and
-never restarts, resets or changes the decoder. Installation is optional and manual:
+never restarts, resets or changes the decoder. Incident notices include a journal
+cursor export command when journal impact records are available; records remain
+in journald and depend on its retention and persistence.
+Installation is optional and manual:
 `install.sh` does not install it. Start in preview mode
 before enabling real mail.
 
