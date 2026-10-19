@@ -11,7 +11,5 @@
   "unknown_seconds": 60,
   "critical_count": 3,
   "critical_window_seconds": 60,
-  "stalled_checks": 2,
-  "retention_days": 7,
-  "evidence_mib": 64
+  "stalled_checks": 2
 }

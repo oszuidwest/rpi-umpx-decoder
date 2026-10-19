@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -31,7 +29,7 @@ func TestMailFailureRetryAndRestart(t *testing.T) {
 	cfg, store := testStore(t)
 	cfg.SendMail = true
 	at := time.Now()
-	if err := store.Update(nil, at, func(s *State) error {
+	if err := store.Update(func(s *State) error {
 		s.Outbox = []Mail{{ID: 1, Subject: "queued", Created: at.Add(-time.Hour)}}
 		return nil
 	}); err != nil {
@@ -71,7 +69,7 @@ func TestPreviewNeverSendsAndDisabledDeliveryPreservesQueue(t *testing.T) {
 	at := time.Now()
 	sender := &fakeSender{}
 	r := Runner{Config: cfg, Store: store, Sender: sender}
-	if err := store.Update(nil, at, func(s *State) error { s.Outbox = []Mail{{ID: 1, Preview: true}, {ID: 2}}; return nil }); err != nil {
+	if err := store.Update(func(s *State) error { s.Outbox = []Mail{{ID: 1, Preview: true}, {ID: 2}}; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.deliver(t.Context(), at); err != nil {
@@ -118,7 +116,7 @@ func TestPreviewsDrainBehindRetainedRealMail(t *testing.T) {
 	at := time.Now()
 	sender := &fakeSender{}
 	r := Runner{Config: cfg, Store: store, Sender: sender}
-	if err := store.Update(nil, at, func(s *State) error {
+	if err := store.Update(func(s *State) error {
 		s.LastObserved = at
 		s.Outbox = []Mail{{ID: 1, Created: at.Add(-time.Hour)}, {ID: 2, Preview: true, Created: at.Add(-time.Hour)}}
 		return nil
@@ -157,14 +155,14 @@ func TestReadyRequiresCurrentObservation(t *testing.T) {
 		{"unknown", func(s *State) { s.LastObserved, s.UnknownSince = at, at }, false},
 		{"fresh_mail", func(s *State) { s.LastObserved, s.Outbox = at, []Mail{{ID: 1, Preview: true, Created: at}} }, true},
 	} {
-		if err := store.Update(nil, at, func(s *State) error { *s = State{Version: 1}; tc.state(s); return nil }); err != nil {
+		if err := store.Update(func(s *State) error { *s = State{Version: 1}; tc.state(s); return nil }); err != nil {
 			t.Fatal(err)
 		}
 		if got := r.ready(at); got != tc.want {
 			t.Errorf("%s: ready=%v, want %v", tc.name, got, tc.want)
 		}
 	}
-	if err := store.Update(nil, at, func(s *State) error { *s = State{Version: 1, LastObserved: at}; return nil }); err != nil {
+	if err := store.Update(func(s *State) error { *s = State{Version: 1, LastObserved: at}; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	r.blocked = true
@@ -186,7 +184,7 @@ func TestShutdownDuringSendIsNotAFailedAttempt(t *testing.T) {
 	cfg, store := testStore(t)
 	cfg.SendMail = true
 	at := time.Now()
-	if err := store.Update(nil, at, func(s *State) error { s.Outbox = []Mail{{ID: 1, Created: at}}; return nil }); err != nil {
+	if err := store.Update(func(s *State) error { s.Outbox = []Mail{{ID: 1, Created: at}}; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -211,7 +209,7 @@ func (p *scriptedProbe) Read(_ context.Context, bookmark Bookmark) (Probe, error
 	return probe, nil
 }
 
-func TestPollCommitsEvidenceAndAdvancesTheBookmark(t *testing.T) {
+func TestPollAdvancesTheCommittedBookmark(t *testing.T) {
 	t.Parallel()
 	cfg, store := testStore(t)
 	probe := &scriptedProbe{}
@@ -224,9 +222,9 @@ func TestPollCommitsEvidenceAndAdvancesTheBookmark(t *testing.T) {
 	if len(probe.seen) != 3 || probe.seen[0] != (Bookmark{}) || probe.seen[2] != (Bookmark{Cursor: "c2", Key: "k2"}) {
 		t.Fatalf("poll did not resume from the committed bookmark: %+v", probe.seen)
 	}
-	entries, err := os.ReadDir(filepath.Join(cfg.StateDir, "evidence"))
-	if err != nil || len(entries) != 3 {
-		t.Fatalf("records were not committed as evidence: %d %v", len(entries), err)
+	s, err := store.Snapshot()
+	if err != nil || s.Bookmark != (Bookmark{Cursor: "c3", Key: "k3"}) {
+		t.Fatalf("last poll bookmark was not committed: %+v %v", s.Bookmark, err)
 	}
 }
 
@@ -250,7 +248,7 @@ func TestFullOutboxDoesNotStopObservation(t *testing.T) {
 		cfg, store := testStore(t)
 		cfg.SendMail = true
 		at := time.Now()
-		if err := store.Update(nil, at, func(s *State) error {
+		if err := store.Update(func(s *State) error {
 			for i := range maxOutbox {
 				s.Outbox = append(s.Outbox, Mail{ID: uint64(i) + 1, Created: at, NextAttempt: at.Add(time.Hour)})
 			}
@@ -298,7 +296,7 @@ func TestJournalGapIsLoggedWhenItsObservationCommits(t *testing.T) {
 	})
 	cfg, store := testStore(t)
 	at := time.Now()
-	if err := store.Update(nil, at, func(s *State) error {
+	if err := store.Update(func(s *State) error {
 		for i := range maxOutbox {
 			s.Outbox = append(s.Outbox, Mail{ID: uint64(i) + 1, Preview: true, Created: at})
 		}
@@ -314,7 +312,7 @@ func TestJournalGapIsLoggedWhenItsObservationCommits(t *testing.T) {
 	if strings.Contains(logs.String(), "continuity lost") {
 		t.Fatal("gap logged for an observation that was not committed")
 	}
-	if err := store.Update(nil, at, func(s *State) error { s.Outbox = nil; return nil }); err != nil {
+	if err := store.Update(func(s *State) error { s.Outbox = nil; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	probe.inactive = false

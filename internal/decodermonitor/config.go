@@ -35,8 +35,6 @@ type Config struct {
 	CriticalCount      int    `json:"critical_count"`
 	CriticalWindowSecs int    `json:"critical_window_seconds"`
 	StalledChecks      int    `json:"stalled_checks"`
-	RetentionDays      int    `json:"retention_days"`
-	EvidenceMiB        int    `json:"evidence_mib"`
 }
 
 // DefaultConfig supplies provisional, configurable incident thresholds.
@@ -46,7 +44,6 @@ func DefaultConfig() Config {
 		StateDir:  "/var/lib/micrompx-watchdog", PollSeconds: 10,
 		RecoverySeconds: 900, ReminderSeconds: 900, UnknownSeconds: 60,
 		CriticalCount: 3, CriticalWindowSecs: 60, StalledChecks: 2,
-		RetentionDays: 7, EvidenceMiB: 64,
 	}
 }
 
@@ -87,8 +84,6 @@ func (c *Config) Validate() error {
 		{"critical_count", c.CriticalCount, 2, 100},
 		{"critical_window_seconds", c.CriticalWindowSecs, 10, 3600},
 		{"stalled_checks", c.StalledChecks, 2, 10},
-		{"retention_days", c.RetentionDays, 1, 90},
-		{"evidence_mib", c.EvidenceMiB, 4, 1024},
 	} {
 		if b.value < b.lo || b.value > b.hi {
 			return fmt.Errorf("%s must be between %d and %d", b.name, b.lo, b.hi)

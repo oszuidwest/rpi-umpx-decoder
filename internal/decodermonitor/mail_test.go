@@ -182,7 +182,7 @@ func TestRetryAfterPersistsAcrossRestart(t *testing.T) {
 			t.Parallel()
 			cfg, store := testStore(t)
 			cfg.SendMail = true
-			if err := store.Update(nil, at, func(s *State) error {
+			if err := store.Update(func(s *State) error {
 				s.Outbox = []Mail{{ID: 1, Created: at, Subject: "Test", Body: "Body"}}
 				return nil
 			}); err != nil {

@@ -19,15 +19,16 @@ var errOutboxFull = errors.New("watchdog outbox is full; cursor was not advanced
 
 // Incident is persisted with the cursor and notifications in one state commit.
 type Incident struct {
-	ID         uint64    `json:"id"`
-	Opened     time.Time `json:"opened"`
-	LastImpact time.Time `json:"last_impact"`
-	CleanSince time.Time `json:"-"` // a restart cannot count unobserved time toward recovery
-	LastNotice time.Time `json:"last_notice"`
-	Severity   string    `json:"severity"`
-	Reason     string    `json:"reason"`
-	Records    int64     `json:"records"`
-	Historical bool      `json:"historical"`
+	ID                 uint64    `json:"id"`
+	Opened             time.Time `json:"opened"`
+	LastImpact         time.Time `json:"last_impact"`
+	CleanSince         time.Time `json:"-"` // a restart cannot count unobserved time toward recovery
+	LastNotice         time.Time `json:"last_notice"`
+	Severity           string    `json:"severity"`
+	Reason             string    `json:"reason"`
+	FirstJournalCursor string    `json:"first_journal_cursor,omitempty"`
+	Records            int64     `json:"records"`
+	Historical         bool      `json:"historical"`
 	// What the last notice announced; a difference is news, not a reminder.
 	NoticedSeverity   string `json:"noticed_severity"`
 	NoticedHistorical bool   `json:"noticed_historical"`
@@ -117,8 +118,8 @@ func (e *Engine) observed(s *State, now time.Time) error {
 	return nil
 }
 
-// Step applies one bounded read without I/O. Store.Update persists the records
-// as evidence before it commits this state, so the cursor never runs ahead.
+// Step applies one bounded read without I/O. Store.Update commits the resulting
+// cursor, incident and notifications together.
 func (e *Engine) Step(s *State, p *Probe, now time.Time) error {
 	continuous := !s.LastObserved.IsZero() && now.Sub(s.LastObserved) >= 0 && now.Sub(s.LastObserved) <= 2*seconds(e.Config.PollSeconds)
 	if !continuous {
@@ -222,6 +223,9 @@ func (e *Engine) record(s *State, record Record, now time.Time) {
 	// Live records can be up to one poll old, plus slack for a late poll.
 	historical := now.Sub(eventTime) > max(30*time.Second, 2*seconds(e.Config.PollSeconds)) || eventTime.After(now.Add(2*time.Second))
 	e.impact(s, eventTime, "warning", "decoder reported buffer starvation or inserted silence", historical)
+	if s.Incident.Records == 0 {
+		s.Incident.FirstJournalCursor = record.Cursor
+	}
 	s.Incident.Records++
 	if starvation {
 		cutoff := eventTime.Add(-seconds(e.Config.CriticalWindowSecs))
@@ -271,6 +275,9 @@ func (e *Engine) notice(s *State, caughtUp bool, now time.Time) error {
 		label = "REMINDER " + label
 	}
 	body := fmt.Sprintf("Incident %d\nReason: %s\nFirst impact: %s\nLast impact: %s\nImpact log records: %d (not independent physical dropouts)\nSeverity: %s\n", i.ID, i.Reason, i.Opened.Format(time.RFC3339), i.LastImpact.Format(time.RFC3339), i.Records, i.Severity)
+	if i.FirstJournalCursor != "" {
+		body += "Export journal records:\njournalctl -u micrompx.service --cursor='" + strings.ReplaceAll(i.FirstJournalCursor, "'", "'\\''") + "'\n"
+	}
 	if err := e.enqueue(s, now, "["+label+"] MicroMPX decoder incident", body, i.ID); err != nil {
 		return err
 	}

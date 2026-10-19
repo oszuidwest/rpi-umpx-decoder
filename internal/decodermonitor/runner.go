@@ -39,7 +39,6 @@ func (r *Runner) Run(ctx context.Context) error {
 	ticker := time.NewTicker(seconds(r.Config.PollSeconds))
 	defer ticker.Stop()
 	heartbeat := time.Now().Add(-time.Minute)
-	pruned := time.Time{}
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
@@ -56,13 +55,6 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		r.blocked = errors.Is(err, errOutboxFull)
 		now := time.Now()
-		if now.Sub(pruned) >= time.Hour {
-			// Retention is housekeeping: a failure must not end observation.
-			if err := r.Store.Prune(now); err != nil {
-				slog.Error("watchdog evidence retention failed", "error", err)
-			}
-			pruned = now
-		}
 		if r.Config.HeartbeatURL != "" && now.Sub(heartbeat) >= time.Minute {
 			if r.ready(now) {
 				r.ping(ctx)
@@ -91,13 +83,13 @@ func (r *Runner) poll(ctx context.Context) error {
 	// Diagnostics follow a committed transition, so a poll rejected by a full
 	// outbox neither repeats nor loses them.
 	if probeErr != nil {
-		err := r.Store.Update(nil, now, func(s *State) error { return engine.Failed(s, now) })
+		err := r.Store.Update(func(s *State) error { return engine.Failed(s, now) })
 		if err == nil && state.observing() {
 			slog.Warn("watchdog decoder observation unavailable", "error", probeErr)
 		}
 		return err
 	}
-	if err := r.Store.Update(probe.Records, now, func(s *State) error {
+	if err := r.Store.Update(func(s *State) error {
 		return engine.Step(s, &probe, now)
 	}); err != nil {
 		return err
@@ -165,7 +157,7 @@ func (r *Runner) deliver(ctx context.Context, now time.Time) error {
 			slog.Info("watchdog mail accepted by M365 (not delivery confirmation)", "notification_id", mail.ID)
 		}
 	}
-	return r.Store.Update(nil, now, func(s *State) error {
+	return r.Store.Update(func(s *State) error {
 		i := slices.IndexFunc(s.Outbox, func(m Mail) bool { return m.ID == mail.ID })
 		if i < 0 {
 			return fmt.Errorf("watchdog mail queue changed unexpectedly")
