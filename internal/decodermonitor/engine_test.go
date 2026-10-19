@@ -206,7 +206,7 @@ func TestEngineFaultsAndMissingTelemetry(t *testing.T) {
 		reason string
 	}{
 		{"inactive", func(p *Probe) { p.Active = "inactive" }, "decoder service is not active"},
-		{"activating", func(p *Probe) { p.Active, p.MainPID = "activating", 0 }, "decoder service is not active"},
+		{"deactivating", func(p *Probe) { p.Active, p.MainPID = "deactivating", 0 }, "decoder service is not active"},
 		{"no_pid", func(p *Probe) { p.MainPID = 0 }, "decoder service is not active"},
 		{"negative_pid", func(p *Probe) { p.MainPID = -1 }, "decoder service is not active"},
 		{"xrun", func(p *Probe) { p.PCM.State = "XRUN" }, "playback PCM is not running (XRUN)"},

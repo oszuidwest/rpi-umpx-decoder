@@ -190,6 +190,7 @@ func TestStoreSkipsUnchangedStateAndKeepsBaselineInMemory(t *testing.T) {
 	}
 	if err := store.Update(nil, at, func(s *State) error {
 		s.LastObserved, s.Stalled, s.LastPCM.Applied = at, 1, 42
+		s.NotHealthySince = at
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -198,7 +199,7 @@ func TestStoreSkipsUnchangedStateAndKeepsBaselineInMemory(t *testing.T) {
 		t.Fatal("state rewritten although no durable field changed")
 	}
 	s, err := store.Snapshot()
-	if err != nil || !s.LastObserved.Equal(at) || s.Stalled != 1 || s.LastPCM.Applied != 42 {
+	if err != nil || !s.LastObserved.Equal(at) || s.Stalled != 1 || s.LastPCM.Applied != 42 || !s.NotHealthySince.Equal(at) {
 		t.Fatalf("in-memory baseline lost: %+v %v", s, err)
 	}
 	if err := store.Update(nil, at, func(s *State) error { s.Bookmark.Cursor = "moved"; return nil }); err != nil {
@@ -213,7 +214,7 @@ func TestStoreSkipsUnchangedStateAndKeepsBaselineInMemory(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
 	s, err = reopened.Snapshot()
-	if err != nil || s.Bookmark.Cursor != "moved" || !s.LastObserved.IsZero() || s.Stalled != 0 || s.LastPCM.Applied != 0 {
+	if err != nil || s.Bookmark.Cursor != "moved" || !s.LastObserved.IsZero() || s.Stalled != 0 || s.LastPCM.Applied != 0 || !s.NotHealthySince.IsZero() {
 		t.Fatalf("restart did not start from a fresh baseline: %+v %v", s, err)
 	}
 }
@@ -311,5 +312,27 @@ func TestStoreRewritesAfterAmbiguousCommit(t *testing.T) {
 	}
 	if s, err := store.Snapshot(); err != nil || s.Bookmark.Cursor != "renamed" {
 		t.Fatalf("memory diverged from the ambiguous commit: %+v %v", s.Bookmark, err)
+	}
+}
+
+func TestStoreRejectedChangeCannotAlterCommittedRestarts(t *testing.T) {
+	t.Parallel()
+	_, store := testStore(t)
+	at := time.Now()
+	if err := store.Update(nil, at, func(s *State) error { s.Restarts = []time.Time{at, at.Add(time.Second)}; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	// Engine.observeService prunes the slice in place before a later error
+	// (for example a full outbox) rejects the whole transition.
+	sentinel := errors.New("outbox full")
+	if err := store.Update(nil, at, func(s *State) error {
+		s.Restarts = append(s.Restarts[:0], at.Add(time.Hour))
+		return sentinel
+	}); !errors.Is(err, sentinel) {
+		t.Fatal(err)
+	}
+	s, err := store.Snapshot()
+	if err != nil || len(s.Restarts) != 2 || !s.Restarts[0].Equal(at) {
+		t.Fatalf("rejected transition altered committed restarts: %v %v", s.Restarts, err)
 	}
 }

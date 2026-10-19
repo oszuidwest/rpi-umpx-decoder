@@ -53,21 +53,23 @@ type Mail struct {
 // The playback baseline is not persisted: after a restart the first poll is
 // never continuous, so the watchdog starts from a fresh baseline.
 type State struct {
-	Version        int         `json:"version"`
-	Bookmark       Bookmark    `json:"bookmark"`
-	BootID         string      `json:"-"`
-	LastObserved   time.Time   `json:"-"`
-	LastMonotonic  float64     `json:"-"`
-	LastPCM        PCM         `json:"-"`
-	LastPID        int         `json:"-"`
-	Stalled        int         `json:"-"`
-	ExplicitFaults int         `json:"-"`
-	Recent         []time.Time `json:"recent"`
-	Incident       Incident    `json:"incident"`
-	UnknownSince   time.Time   `json:"-"` // a restart starts a fresh grace period
-	UnknownNoticed bool        `json:"unknown_noticed"`
-	NextID         uint64      `json:"next_id"`
-	Outbox         []Mail      `json:"outbox"`
+	Version         int         `json:"version"`
+	Bookmark        Bookmark    `json:"bookmark"`
+	BootID          string      `json:"-"`
+	LastObserved    time.Time   `json:"-"`
+	LastMonotonic   float64     `json:"-"`
+	LastPCM         PCM         `json:"-"`
+	LastPID         int         `json:"-"`
+	Stalled         int         `json:"-"`
+	ExplicitFaults  int         `json:"-"`
+	NotHealthySince time.Time   `json:"-"`
+	Restarts        []time.Time `json:"-"` // observed decoder restarts within critical_window_seconds
+	Recent          []time.Time `json:"recent"`
+	Incident        Incident    `json:"incident"`
+	UnknownSince    time.Time   `json:"-"` // a restart starts a fresh grace period
+	UnknownNoticed  bool        `json:"unknown_noticed"`
+	NextID          uint64      `json:"next_id"`
+	Outbox          []Mail      `json:"outbox"`
 }
 
 // Engine contains no I/O.
@@ -130,14 +132,16 @@ func (e *Engine) Step(s *State, p *Probe, now time.Time) error {
 		s.Incident.CleanSince = time.Time{}
 		s.Stalled = 0
 	}
-	if !continuous || s.BootID != p.BootID {
-		s.ExplicitFaults = 0
-	}
+	e.observeService(s, p, now, continuous)
 	p.Reason = p.unknownReason()
 	for _, record := range p.Records {
 		e.record(s, record, now)
 	}
-	progress, fault := e.playback(s, p, continuous)
+	starting := e.starting(s, p, now)
+	progress, fault := e.playback(s, p, continuous, starting)
+	if progress {
+		s.NotHealthySince = time.Time{}
+	}
 	if fault != "" {
 		e.impact(s, now, "critical", fault, false)
 	}
@@ -155,6 +159,9 @@ func (e *Engine) Step(s *State, p *Probe, now time.Time) error {
 	}
 	s.Bookmark = p.Bookmark
 	s.BootID, s.LastPCM, s.LastPID = p.BootID, p.PCM, p.MainPID
+	if p.Active == "unknown" {
+		s.LastPID = 0 // a failed status read cannot establish a restart baseline
+	}
 	s.LastObserved, s.LastMonotonic = now, p.Monotonic
 	// playback only reports progress without a fault.
 	if err := e.recover(s, now, progress); err != nil {
@@ -177,11 +184,42 @@ func (e *Engine) recover(s *State, now time.Time, playbackOK bool) error {
 	if err := e.enqueue(s, now, "[RECOVERY] Decoder impact observations cleared", body, 0); err != nil {
 		return err
 	}
-	s.Incident, s.Recent = Incident{}, nil
+	s.Incident, s.Recent, s.Restarts = Incident{}, nil, nil
 	return nil
 }
 
-func (e *Engine) playback(s *State, p *Probe, continuous bool) (progress bool, fault string) {
+func (e *Engine) observeService(s *State, p *Probe, now time.Time, continuous bool) {
+	if !continuous || s.BootID != p.BootID {
+		s.ExplicitFaults = 0
+		s.NotHealthySince = time.Time{}
+	}
+	if s.NotHealthySince.IsZero() {
+		s.NotHealthySince = now
+	}
+	if continuous && s.BootID == p.BootID && s.LastPID > 0 && p.Active != "unknown" && p.MainPID != s.LastPID {
+		// A crash loop can reach RUNNING between restarts, so repeated restarts
+		// escalate like repeated buffer starvation.
+		cutoff := now.Add(-seconds(e.Config.CriticalWindowSecs))
+		s.Restarts = append(slices.DeleteFunc(s.Restarts, func(t time.Time) bool { return t.Before(cutoff) }), now)
+		if len(s.Restarts) >= e.Config.CriticalCount {
+			e.impact(s, now, "critical", fmt.Sprintf("decoder service restarting repeatedly (%d restarts within %s, latest MainPID %d → %d)", len(s.Restarts), seconds(e.Config.CriticalWindowSecs), s.LastPID, p.MainPID), false)
+		} else {
+			e.impact(s, now, "warning", fmt.Sprintf("decoder service restarted or stopped (MainPID %d → %d)", s.LastPID, p.MainPID), false)
+		}
+	}
+}
+
+func (e *Engine) starting(s *State, p *Probe, now time.Time) bool {
+	grace := float64(e.Config.StartupGraceSeconds)
+	// /proc/uptime includes suspend time; on a Pi without suspend it agrees
+	// with systemd's CLOCK_MONOTONIC ActiveEnterTimestampMonotonic.
+	age := p.Monotonic - p.ActiveEnterMonotonic
+	// Repeated starts cannot renew grace without observed playback progress.
+	recent := p.ActiveEnterMonotonic > 0 && age >= 0 && age < grace
+	return (p.Active == "activating" || recent) && now.Sub(s.NotHealthySince) < seconds(e.Config.StartupGraceSeconds)
+}
+
+func (e *Engine) playback(s *State, p *Probe, continuous, starting bool) (progress bool, fault string) {
 	switch {
 	case p.Active == "unknown":
 		s.ExplicitFaults = 0
@@ -196,7 +234,7 @@ func (e *Engine) playback(s *State, p *Probe, continuous bool) (progress bool, f
 	}
 	if fault != "" {
 		// The first explicit fault is unknown; pointer stalls are confirmed below.
-		return false, s.confirmFault(p, fault)
+		return false, s.confirmFault(p, fault, starting)
 	}
 	s.ExplicitFaults = 0
 	if p.PCM.Owner != p.MainPID {
@@ -223,9 +261,17 @@ func (e *Engine) playback(s *State, p *Probe, continuous bool) (progress bool, f
 	return true, ""
 }
 
-// confirmFault reports an explicit fault only once it has been seen on
-// consecutive polls; until then it is named as the reason for being unknown.
-func (s *State) confirmFault(p *Probe, fault string) string {
+// confirmFault reports an explicit fault only outside the startup grace and
+// once it has been seen on consecutive polls; until then it is named as the
+// reason for being unknown.
+func (s *State) confirmFault(p *Probe, fault string, starting bool) string {
+	if starting {
+		s.ExplicitFaults = 0
+		if p.Reason == "" {
+			p.Reason = "decoder starting (" + fault + ")"
+		}
+		return ""
+	}
 	s.ExplicitFaults = min(s.ExplicitFaults+1, explicitFaultChecks)
 	if s.ExplicitFaults < explicitFaultChecks {
 		if p.Reason == "" {

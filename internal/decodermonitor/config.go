@@ -22,21 +22,22 @@ var pcmPath = regexp.MustCompile(`^/proc/asound/[a-zA-Z0-9_-]+/pcm\d+p/sub\d+/st
 // Config is independent of the encoder configuration and belongs on each decoder.
 // Sending mail is opt-in; neither check mode nor the default preview mode sends it.
 type Config struct {
-	Site               string `json:"site"`
-	PCMStatus          string `json:"pcm_status"`
-	StateDir           string `json:"state_dir"`
-	EmailFile          string `json:"email_file"`
-	SendMail           bool   `json:"send_mail"`
-	HeartbeatURL       string `json:"heartbeat_url,omitempty"`
-	PollSeconds        int    `json:"poll_seconds"`
-	RecoverySeconds    int    `json:"recovery_seconds"`
-	ReminderSeconds    int    `json:"reminder_seconds"`
-	UnknownSeconds     int    `json:"unknown_seconds"`
-	CriticalCount      int    `json:"critical_count"`
-	CriticalWindowSecs int    `json:"critical_window_seconds"`
-	StalledChecks      int    `json:"stalled_checks"`
-	RetentionDays      int    `json:"retention_days"`
-	EvidenceMiB        int    `json:"evidence_mib"`
+	Site                string `json:"site"`
+	PCMStatus           string `json:"pcm_status"`
+	StateDir            string `json:"state_dir"`
+	EmailFile           string `json:"email_file"`
+	SendMail            bool   `json:"send_mail"`
+	HeartbeatURL        string `json:"heartbeat_url,omitempty"`
+	PollSeconds         int    `json:"poll_seconds"`
+	StartupGraceSeconds int    `json:"startup_grace_seconds"`
+	RecoverySeconds     int    `json:"recovery_seconds"`
+	ReminderSeconds     int    `json:"reminder_seconds"`
+	UnknownSeconds      int    `json:"unknown_seconds"`
+	CriticalCount       int    `json:"critical_count"`
+	CriticalWindowSecs  int    `json:"critical_window_seconds"`
+	StalledChecks       int    `json:"stalled_checks"`
+	RetentionDays       int    `json:"retention_days"`
+	EvidenceMiB         int    `json:"evidence_mib"`
 }
 
 // DefaultConfig supplies provisional, configurable incident thresholds.
@@ -44,7 +45,7 @@ func DefaultConfig() Config {
 	return Config{
 		PCMStatus: "/proc/asound/sndrpihifiberry/pcm0p/sub0/status",
 		StateDir:  "/var/lib/micrompx-watchdog", PollSeconds: 10,
-		RecoverySeconds: 900, ReminderSeconds: 900, UnknownSeconds: 60,
+		StartupGraceSeconds: 60, RecoverySeconds: 900, ReminderSeconds: 900, UnknownSeconds: 60,
 		CriticalCount: 3, CriticalWindowSecs: 60, StalledChecks: 2,
 		RetentionDays: 7, EvidenceMiB: 64,
 	}
@@ -81,6 +82,7 @@ func (c *Config) Validate() error {
 		value, lo, hi int
 	}{
 		{"poll_seconds", c.PollSeconds, 10, 60},
+		{"startup_grace_seconds", c.StartupGraceSeconds, 10, 600},
 		{"recovery_seconds", c.RecoverySeconds, 60, 86400},
 		{"reminder_seconds", c.ReminderSeconds, 60, 86400},
 		{"unknown_seconds", c.UnknownSeconds, c.PollSeconds, 3600},

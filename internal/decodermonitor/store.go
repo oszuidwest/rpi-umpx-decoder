@@ -128,7 +128,9 @@ func (s *Store) current() (State, error) {
 		s.state, s.saved, s.loaded = state, nil, true
 	}
 	state := s.state
+	// Every slice is cloned: a rejected change must not alter committed state.
 	state.Recent, state.Outbox = slices.Clone(s.state.Recent), slices.Clone(s.state.Outbox)
+	state.Restarts = slices.Clone(s.state.Restarts)
 	return state, nil
 }
 
