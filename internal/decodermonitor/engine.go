@@ -11,6 +11,7 @@ import (
 )
 
 const maxOutbox = 128
+const explicitFaultChecks = 2
 
 var silenceSamples = regexp.MustCompile(`\b(\d+) samples silence played\b`)
 
@@ -57,6 +58,7 @@ type State struct {
 	LastPCM        PCM         `json:"-"`
 	LastPID        int         `json:"-"`
 	Stalled        int         `json:"-"`
+	ExplicitFaults int         `json:"-"`
 	Recent         []time.Time `json:"recent"`
 	Incident       Incident    `json:"incident"`
 	UnknownSince   time.Time   `json:"-"` // a restart starts a fresh grace period
@@ -125,6 +127,9 @@ func (e *Engine) Step(s *State, p *Probe, now time.Time) error {
 		s.Incident.CleanSince = time.Time{}
 		s.Stalled = 0
 	}
+	if !continuous || s.BootID != p.BootID {
+		s.ExplicitFaults = 0
+	}
 	uncertain := p.unverified()
 	for _, record := range p.Records {
 		if strings.Contains(strings.ToLower(record.Message), "suppressed") {
@@ -174,18 +179,27 @@ func (e *Engine) recover(s *State, now time.Time, playbackOK bool) error {
 }
 
 func (e *Engine) playback(s *State, p *Probe, continuous bool) (progress bool, fault string) {
-	if p.Active == "unknown" {
+	switch {
+	case p.Active == "unknown":
+		s.ExplicitFaults = 0
 		return false, ""
-	}
-	if p.Active != "active" || p.MainPID <= 0 {
-		return false, "decoder service is not active"
-	}
-	if p.PCM.State == "unavailable" {
+	case p.Active != "active" || p.MainPID <= 0:
+		fault = "decoder service is not active"
+	case p.PCM.State == "unavailable":
+		s.ExplicitFaults = 0
 		return false, ""
+	case p.PCM.State != "RUNNING":
+		fault = "playback PCM is not running (" + p.PCM.State + ")"
 	}
-	if p.PCM.State != "RUNNING" {
-		return false, "playback PCM is not running (" + p.PCM.State + ")"
+	if fault != "" {
+		// The first explicit fault is unknown; pointer stalls are confirmed below.
+		s.ExplicitFaults = min(s.ExplicitFaults+1, explicitFaultChecks)
+		if s.ExplicitFaults < explicitFaultChecks {
+			return false, ""
+		}
+		return false, fault
 	}
+	s.ExplicitFaults = 0
 	if p.PCM.Owner != p.MainPID {
 		return false, ""
 	}
