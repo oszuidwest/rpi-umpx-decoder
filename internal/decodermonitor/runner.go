@@ -40,9 +40,16 @@ func (r *Runner) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	heartbeat := time.Now().Add(-time.Minute)
 	pruned := time.Time{}
+	mailCheck := true // once per start; a full outbox retries on the next poll
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
+		}
+		if mailCheck {
+			var err error
+			if mailCheck, err = r.queueMailCheck(); err != nil {
+				return err
+			}
 		}
 		err := r.poll(ctx)
 		// A full queue waits for delivery instead of ending observation: the
@@ -75,6 +82,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// queueMailCheck reports whether the start-up mail check must be retried
+// because the outbox is full.
+func (r *Runner) queueMailCheck() (retry bool, err error) {
+	engine := Engine{Config: r.Config}
+	err = r.Store.Update(nil, time.Now(), func(s *State) error { return engine.MailCheck(s, time.Now()) })
+	if errors.Is(err, errOutboxFull) {
+		return true, nil
+	}
+	return false, err
 }
 
 func (r *Runner) poll(ctx context.Context) error {
@@ -165,24 +183,54 @@ func (r *Runner) deliver(ctx context.Context, now time.Time) error {
 			slog.Info("watchdog mail accepted by M365 (not delivery confirmation)", "notification_id", mail.ID)
 		}
 	}
-	return r.Store.Update(nil, now, func(s *State) error {
+	var deadLetter *DeadLetter
+	err = r.Store.Update(nil, now, func(s *State) error {
 		i := slices.IndexFunc(s.Outbox, func(m Mail) bool { return m.ID == mail.ID })
 		if i < 0 {
 			return fmt.Errorf("watchdog mail queue changed unexpectedly")
 		}
 		if sendErr == nil {
 			s.Outbox = slices.Delete(s.Outbox, i, i+1)
+			if !mail.Preview {
+				s.MailCredentialFailed = false
+			}
 			return nil
 		}
 		next := &s.Outbox[i]
 		next.Attempts++
 		next.NextAttempt = now.Add(seconds(1 << min(next.Attempts, 8)))
 		var rejection *deliveryError
-		if errors.As(sendErr, &rejection) && rejection.retryAfter.After(next.NextAttempt) {
-			next.NextAttempt = rejection.retryAfter
+		if errors.As(sendErr, &rejection) {
+			if next.Attempts >= maxMailAttempts {
+				switch rejection.status {
+				case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+					deadLetter = s.deadLetter(i, rejection.status, now)
+					return nil
+				}
+			}
+			if rejection.retryAfter.After(next.NextAttempt) {
+				next.NextAttempt = rejection.retryAfter
+			}
 		}
 		return nil
 	})
+	if err == nil && deadLetter != nil {
+		slog.Error("watchdog M365 mail dead-lettered", "notification_id", deadLetter.ID, "subject", deadLetter.Subject, "status", deadLetter.Status, "attempts", deadLetter.Attempts)
+	}
+	return err
+}
+
+func (s *State) deadLetter(i, status int, now time.Time) *DeadLetter {
+	letter := &DeadLetter{Mail: s.Outbox[i], Status: status, Failed: now}
+	s.DeadLetters = append(s.DeadLetters, *letter)
+	if len(s.DeadLetters) > maxDeadLetters {
+		s.DeadLetters = slices.Delete(s.DeadLetters, 0, len(s.DeadLetters)-maxDeadLetters)
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		s.MailCredentialFailed = true
+	}
+	s.Outbox = slices.Delete(s.Outbox, i, i+1)
+	return letter
 }
 
 func (r *Runner) ready(now time.Time) bool {
@@ -190,7 +238,7 @@ func (r *Runner) ready(now time.Time) bool {
 		return false // the last poll's observation was not committed
 	}
 	s, err := r.Store.Snapshot()
-	if err != nil || !s.observing() || s.LastObserved.IsZero() || now.Sub(s.LastObserved) > 2*seconds(r.Config.PollSeconds) {
+	if err != nil || s.MailCredentialFailed || !s.observing() || s.LastObserved.IsZero() || now.Sub(s.LastObserved) > 2*seconds(r.Config.PollSeconds) {
 		return false
 	}
 	// Known decoder faults do not masquerade as a dead monitoring pipeline.

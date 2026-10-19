@@ -10,7 +10,11 @@ import (
 	"time"
 )
 
-const maxOutbox = 128
+const (
+	maxOutbox       = 128
+	maxMailAttempts = 5
+	maxDeadLetters  = 32
+)
 
 var silenceSamples = regexp.MustCompile(`\b(\d+) samples silence played\b`)
 
@@ -45,6 +49,13 @@ type Mail struct {
 	IncidentID  uint64    `json:"incident_id,omitempty"`
 }
 
+// DeadLetter retains a mail removed from the outbox after permanent rejection.
+type DeadLetter struct {
+	Mail
+	Status int       `json:"status"`
+	Failed time.Time `json:"failed"`
+}
+
 // State includes both transport incidents and separate monitoring uncertainty.
 // The playback baseline is not persisted: after a restart the first poll is
 // never continuous, so the watchdog starts from a fresh baseline.
@@ -63,6 +74,9 @@ type State struct {
 	UnknownNoticed bool        `json:"unknown_noticed"`
 	NextID         uint64      `json:"next_id"`
 	Outbox         []Mail      `json:"outbox"`
+
+	DeadLetters          []DeadLetter `json:"dead_letters,omitempty"`
+	MailCredentialFailed bool         `json:"mail_credential_failed,omitempty"`
 }
 
 // Engine contains no I/O.
@@ -99,6 +113,16 @@ func (e *Engine) unknown(s *State, now time.Time) error {
 		s.UnknownNoticed = true
 	}
 	return nil
+}
+
+// MailCheck queues one real notification after a start while a credential
+// failure is latched: only a mail accepted by Graph clears the latch and
+// restores the heartbeat. Any queued real mail serves the same purpose.
+func (e *Engine) MailCheck(s *State, now time.Time) error {
+	if !e.Config.SendMail || !s.MailCredentialFailed || slices.ContainsFunc(s.Outbox, func(m Mail) bool { return !m.Preview }) {
+		return nil
+	}
+	return e.enqueue(s, now, "[MAIL CHECK] Watchdog mail delivery check", "An earlier notification was rejected by Microsoft Graph (HTTP 401/403) and moved to dead_letters in state.json. The heartbeat stays withheld until a notification is accepted. This message checks delivery after a watchdog start; it does not report a decoder incident.", 0)
 }
 
 // Failed records uncertainty without clearing an existing decoder incident.
