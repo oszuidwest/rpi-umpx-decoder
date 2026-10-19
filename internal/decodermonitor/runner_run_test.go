@@ -92,7 +92,14 @@ func TestRunnerRunHeartbeatCadenceAndMailWorkerJoin(t *testing.T) {
 			t.Fatal(err)
 		}
 		time.Sleep(2 * time.Second)
-		<-sender.entered
+		// Synthetic time: a mail worker that stopped early fails fast instead
+		// of waiting for the global test timeout.
+		select {
+		case <-sender.entered:
+		case <-time.After(time.Minute):
+			cancel()
+			t.Fatal("queued mail never reached the sender")
+		}
 		cancel()
 		synctest.Wait()
 		select {
