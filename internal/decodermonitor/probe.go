@@ -3,6 +3,7 @@ package decodermonitor
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -70,12 +71,19 @@ type Prober interface {
 }
 
 // LocalProbe reads journalctl and procfs without opening a PCM device.
-type LocalProbe struct{ PCMStatus string }
+type LocalProbe struct {
+	PCMStatus string
+
+	// Empty paths use /usr/bin/journalctl, /usr/bin/systemctl and /proc.
+	journalctlPath string
+	systemctlPath  string
+	procRoot       string
+}
 
 // Read only invokes journalctl and systemctl show, never service-control actions.
 func (p LocalProbe) Read(ctx context.Context, bookmark Bookmark) (Probe, error) {
 	var result Probe
-	root, err := os.OpenRoot("/proc")
+	root, err := os.OpenRoot(cmp.Or(p.procRoot, "/proc"))
 	if err != nil {
 		return Probe{}, fmt.Errorf("open procfs: %w", err)
 	}
@@ -99,16 +107,16 @@ func (p LocalProbe) Read(ctx context.Context, bookmark Bookmark) (Probe, error) 
 	result.BootID = strings.TrimSpace(boot)
 	result.PCM = readPCM(root, p.PCMStatus)
 	statusCtx, statusCancel := context.WithTimeout(ctx, 2*time.Second)
-	result.Active, result.MainPID, result.StatusErr = serviceStatus(statusCtx)
+	result.Active, result.MainPID, result.StatusErr = p.serviceStatus(statusCtx)
 	statusCancel()
 	if result.StatusErr != nil {
 		result.Active = "unknown"
 	}
 	// Journal failures must not blind the independent kernel playback check.
 	journalCtx, journalCancel := context.WithTimeout(ctx, 5*time.Second)
-	journal, journalErr := readJournal(journalCtx, bookmark)
+	journal, journalErr := p.readJournal(journalCtx, bookmark)
 	if journalErr == nil && journal.Gap {
-		journal, journalErr = readJournal(journalCtx, Bookmark{})
+		journal, journalErr = p.readJournal(journalCtx, Bookmark{})
 		journal.Gap = true
 	}
 	journalCancel()
@@ -121,7 +129,7 @@ func (p LocalProbe) Read(ctx context.Context, bookmark Bookmark) (Probe, error) 
 	return result, nil
 }
 
-func readJournal(ctx context.Context, bookmark Bookmark) (Probe, error) {
+func (p LocalProbe) readJournal(ctx context.Context, bookmark Bookmark) (Probe, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	// Only MESSAGE plus the identity fields journalctl always adds: a large field,
@@ -135,7 +143,7 @@ func readJournal(ctx context.Context, bookmark Bookmark) (Probe, error) {
 	} else {
 		args = append(args, "--since=@"+strconv.FormatInt(time.Now().Add(-time.Minute).Unix(), 10))
 	}
-	cmd := exec.CommandContext(ctx, "/usr/bin/journalctl", args...)
+	cmd := exec.CommandContext(ctx, cmp.Or(p.journalctlPath, "/usr/bin/journalctl"), args...) //nolint:gosec // Private test override; production uses the fixed absolute path.
 	cmd.WaitDelay = time.Second
 	stderr := &boundedBuffer{limit: 8192}
 	cmd.Stderr = stderr
@@ -247,8 +255,8 @@ func journalText(value any) string {
 	return ""
 }
 
-func serviceStatus(ctx context.Context) (active string, pid int, err error) {
-	cmd := exec.CommandContext(ctx, "/usr/bin/systemctl", "show", "--no-pager", "micrompx.service", "-p", "ActiveState", "-p", "MainPID")
+func (p LocalProbe) serviceStatus(ctx context.Context) (active string, pid int, err error) {
+	cmd := exec.CommandContext(ctx, cmp.Or(p.systemctlPath, "/usr/bin/systemctl"), "show", "--no-pager", "micrompx.service", "-p", "ActiveState", "-p", "MainPID") //nolint:gosec // Private test override; production uses the fixed absolute path.
 	cmd.WaitDelay = time.Second
 	output, err := cmd.Output()
 	if err != nil {
