@@ -3,6 +3,9 @@ package decodermonitor
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -104,4 +107,116 @@ func TestRunnerJoinsWorkersOnCancellation(t *testing.T) {
 		}
 		synctest.Wait()
 	})
+}
+
+func TestPreviewsDrainBehindRetainedRealMail(t *testing.T) {
+	t.Parallel()
+	cfg, store := testStore(t)
+	cfg.HeartbeatURL = "https://heartbeat.example.invalid"
+	at := time.Now()
+	sender := &fakeSender{}
+	r := Runner{Config: cfg, Store: store, Sender: sender}
+	if err := store.Update(nil, at, func(s *State) error {
+		s.LastObserved = at
+		s.Outbox = []Mail{{ID: 1, Created: at.Add(-time.Hour)}, {ID: 2, Preview: true, Created: at.Add(-time.Hour)}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.deliver(t.Context(), at); err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Snapshot()
+	if err != nil || sender.calls != 0 || len(s.Outbox) != 1 || s.Outbox[0].ID != 1 {
+		t.Fatalf("preview blocked or real mail sent/discarded: %+v %v", s.Outbox, err)
+	}
+	if !r.ready(at) {
+		t.Fatal("retained real mail stopped the heartbeat while sending is off")
+	}
+	r.Config.SendMail = true
+	if r.ready(at) {
+		t.Fatal("stuck deliverable mail did not stop the heartbeat")
+	}
+}
+
+func TestReadyRequiresCurrentObservation(t *testing.T) {
+	t.Parallel()
+	cfg, store := testStore(t)
+	at := time.Now()
+	r := Runner{Config: cfg, Store: store}
+	for _, tc := range []struct {
+		name  string
+		state func(*State)
+		want  bool
+	}{
+		{"current", func(s *State) { s.LastObserved = at }, true},
+		{"never_observed", func(s *State) {}, false},
+		{"stale", func(s *State) { s.LastObserved = at.Add(-time.Minute) }, false},
+		{"unknown", func(s *State) { s.LastObserved, s.UnknownSince = at, at }, false},
+		{"fresh_mail", func(s *State) { s.LastObserved, s.Outbox = at, []Mail{{ID: 1, Preview: true, Created: at}} }, true},
+	} {
+		if err := store.Update(nil, at, func(s *State) error { *s = State{Version: 1}; tc.state(s); return nil }); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.ready(at); got != tc.want {
+			t.Errorf("%s: ready=%v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+type shutdownSender struct{ cancel context.CancelFunc }
+
+func (s shutdownSender) SendMail(ctx context.Context, _, _ string) error {
+	s.cancel()
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestShutdownDuringSendIsNotAFailedAttempt(t *testing.T) {
+	t.Parallel()
+	cfg, store := testStore(t)
+	cfg.SendMail = true
+	at := time.Now()
+	if err := store.Update(nil, at, func(s *State) error { s.Outbox = []Mail{{ID: 1, Created: at}}; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	r := Runner{Config: cfg, Store: store, Sender: shutdownSender{cancel}}
+	if err := r.deliver(ctx, at); err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Snapshot()
+	if err != nil || len(s.Outbox) != 1 || s.Outbox[0].Attempts != 0 || !s.Outbox[0].NextAttempt.IsZero() {
+		t.Fatalf("shutdown counted as a delivery failure: %+v %v", s.Outbox, err)
+	}
+}
+
+type scriptedProbe struct{ seen []Bookmark }
+
+func (p *scriptedProbe) Read(_ context.Context, bookmark Bookmark) (Probe, error) {
+	p.seen = append(p.seen, bookmark)
+	at := time.Now()
+	probe := *healthyProbe(at, uint64(len(p.seen))*1920000)
+	record := Record{TimeUS: at.UnixMicro(), Message: "Buffer filling", Cursor: fmt.Sprint("c", len(p.seen)), Key: fmt.Sprint("k", len(p.seen)), BootID: "boot-a"}
+	probe.Records, probe.Bookmark = []Record{record}, Bookmark{Cursor: record.Cursor, Key: record.Key}
+	return probe, nil
+}
+
+func TestPollCommitsEvidenceAndAdvancesTheBookmark(t *testing.T) {
+	t.Parallel()
+	cfg, store := testStore(t)
+	probe := &scriptedProbe{}
+	r := Runner{Config: cfg, Store: store, Probe: probe}
+	for range 3 {
+		if err := r.poll(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(probe.seen) != 3 || probe.seen[0] != (Bookmark{}) || probe.seen[2] != (Bookmark{Cursor: "c2", Key: "k2"}) {
+		t.Fatalf("poll did not resume from the committed bookmark: %+v", probe.seen)
+	}
+	entries, err := os.ReadDir(filepath.Join(cfg.StateDir, "evidence"))
+	if err != nil || len(entries) != 3 {
+		t.Fatalf("records were not committed as evidence: %d %v", len(entries), err)
+	}
 }

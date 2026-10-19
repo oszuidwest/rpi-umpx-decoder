@@ -84,7 +84,7 @@ func TestIncidentEvidenceReplay(t *testing.T) {
 						recoveryAt = at
 					}
 				}
-				state.Outbox = nil // Collect notifications in-memory; never send them.
+				state.Outbox = nil // Simulate instant delivery: no mail is sent, reminders stay enabled.
 			}
 			if site == "oudenbosch" {
 				if starvations != 0 || len(incidents) != 0 || recoveries != 0 {

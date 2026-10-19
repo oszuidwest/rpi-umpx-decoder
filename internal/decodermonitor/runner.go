@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 )
@@ -46,8 +47,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		now := time.Now()
 		if now.Sub(pruned) >= time.Hour {
+			// Retention is housekeeping: a failure must not end observation.
 			if err := r.Store.Prune(now); err != nil {
-				return err
+				slog.Error("watchdog evidence retention failed", "error", err)
 			}
 			pruned = now
 		}
@@ -82,10 +84,13 @@ func (r *Runner) poll(ctx context.Context) error {
 		}
 		return r.Store.Update(nil, now, func(s *State) error { return engine.Failed(s, now) })
 	}
-	if probe.JournalError && state.observing() {
-		slog.Warn("watchdog journal unavailable; kernel playback checks remain active")
+	if probe.JournalErr != nil && state.observing() {
+		slog.Warn("watchdog journal unavailable; kernel playback checks remain active", "error", probe.JournalErr)
 	}
-	if !probe.JournalError && probe.Gap {
+	if probe.StatusErr != nil && state.observing() {
+		slog.Warn("watchdog decoder service status unavailable", "error", probe.StatusErr)
+	}
+	if probe.JournalErr == nil && probe.Gap {
 		slog.Warn("watchdog journal continuity lost; missing history cannot be reconstructed", "caught_up", probe.CaughtUp)
 	}
 	return r.Store.Update(probe.Records, now, func(s *State) error {
@@ -116,19 +121,16 @@ func (r *Runner) deliver(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if len(s.Outbox) == 0 || now.Before(s.Outbox[0].NextAttempt) {
+	i := r.firstDeliverable(s.Outbox)
+	if i < 0 || now.Before(s.Outbox[i].NextAttempt) {
 		return nil
 	}
-	mail := s.Outbox[0]
+	mail := s.Outbox[i]
 	var sendErr error
-	switch {
-	case mail.Preview:
+	if mail.Preview {
 		slog.Info("watchdog notification preview (not sent)", "notification_id", mail.ID, "subject", mail.Subject)
-	case !r.Config.SendMail:
-		// Turning delivery off must not discard real, previously queued mail.
-		return nil
-	default:
-		ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	} else {
+		sendCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		defer cancel()
 		subject := mail.Subject
 		body := mail.Body
@@ -136,27 +138,32 @@ func (r *Runner) deliver(ctx context.Context, now time.Time) error {
 			subject = "[DELAYED] " + subject
 			body = "This queued notification describes the state at its detection time, not necessarily the current state.\n\n" + body
 		}
-		sendErr = r.Sender.SendMail(ctx, subject, body)
+		sendErr = r.Sender.SendMail(sendCtx, subject, body)
+		if sendErr != nil && ctx.Err() != nil {
+			return nil // Shutdown, not a failed attempt: retry on the next start.
+		}
 		if sendErr != nil {
-			// Graph/OAuth error responses may contain identities or credentials.
-			slog.Warn("watchdog M365 delivery deferred", "notification_id", mail.ID, "attempt", mail.Attempts+1)
+			// Sender errors carry status codes only, never response bodies.
+			slog.Warn("watchdog M365 delivery deferred", "notification_id", mail.ID, "attempt", mail.Attempts+1, "error", sendErr)
 		} else {
 			slog.Info("watchdog mail accepted by M365 (not delivery confirmation)", "notification_id", mail.ID)
 		}
 	}
 	return r.Store.Update(nil, now, func(s *State) error {
-		if len(s.Outbox) == 0 || s.Outbox[0].ID != mail.ID {
+		i := slices.IndexFunc(s.Outbox, func(m Mail) bool { return m.ID == mail.ID })
+		if i < 0 {
 			return fmt.Errorf("watchdog mail queue changed unexpectedly")
 		}
 		if sendErr == nil {
-			s.Outbox = s.Outbox[1:]
+			s.Outbox = slices.Delete(s.Outbox, i, i+1)
 			return nil
 		}
-		s.Outbox[0].Attempts++
-		s.Outbox[0].NextAttempt = now.Add(seconds(1 << min(s.Outbox[0].Attempts, 8)))
+		next := &s.Outbox[i]
+		next.Attempts++
+		next.NextAttempt = now.Add(seconds(1 << min(next.Attempts, 8)))
 		var rejection *deliveryError
-		if errors.As(sendErr, &rejection) && rejection.retryAfter.After(s.Outbox[0].NextAttempt) {
-			s.Outbox[0].NextAttempt = rejection.retryAfter
+		if errors.As(sendErr, &rejection) && rejection.retryAfter.After(next.NextAttempt) {
+			next.NextAttempt = rejection.retryAfter
 		}
 		return nil
 	})
@@ -168,7 +175,14 @@ func (r *Runner) ready(now time.Time) bool {
 		return false
 	}
 	// Known decoder faults do not masquerade as a dead monitoring pipeline.
-	return len(s.Outbox) == 0 || now.Sub(s.Outbox[0].Created) < 5*time.Minute
+	i := r.firstDeliverable(s.Outbox)
+	return i < 0 || now.Sub(s.Outbox[i].Created) < 5*time.Minute
+}
+
+// firstDeliverable skips real mail kept while send_mail is off: it waits for
+// delivery to be re-enabled without blocking previews or the heartbeat.
+func (r *Runner) firstDeliverable(outbox []Mail) int {
+	return slices.IndexFunc(outbox, func(m Mail) bool { return m.Preview || r.Config.SendMail })
 }
 
 func (r *Runner) ping(ctx context.Context) {

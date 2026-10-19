@@ -222,6 +222,125 @@ func TestEngineFaultsAndMissingTelemetry(t *testing.T) {
 	}
 }
 
+func subjects(s *State) []string {
+	var result []string
+	for _, mail := range s.Outbox {
+		result = append(result, mail.Subject)
+	}
+	return result
+}
+
+func TestEngineRetrospectiveIncidentAnnouncesLiveRecurrenceAndEscalation(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultConfig()
+	cfg.Site = "Test"
+	e, s := Engine{cfg}, State{Version: 1}
+	at := time.Now()
+	p := healthyProbe(at, 0)
+	p.Records = []Record{impactRecord(at.Add(-time.Hour))}
+	advance(t, &e, &s, p, at)
+	if got := subjects(&s); len(got) != 1 || !strings.HasPrefix(got[0], "[RETROSPECTIVE WARNING]") {
+		t.Fatalf("no retrospective summary: %q", got)
+	}
+	// A backlog escalates the retrospective incident while not caught up.
+	at = at.Add(10 * time.Second)
+	p = healthyProbe(at, 1920000)
+	p.CaughtUp = false
+	old := at.Add(-time.Hour)
+	p.Records = []Record{impactRecord(old), impactRecord(old.Add(time.Second)), impactRecord(old.Add(2 * time.Second))}
+	advance(t, &e, &s, p, at)
+	at = at.Add(10 * time.Second)
+	advance(t, &e, &s, healthyProbe(at, 2*1920000), at)
+	if got := subjects(&s); len(got) != 2 || !strings.HasPrefix(got[1], "[RETROSPECTIVE CRITICAL]") {
+		t.Fatalf("escalation during a backlog was not announced: %q", got)
+	}
+	at = at.Add(10 * time.Second)
+	p = healthyProbe(at, 3*1920000)
+	p.Records = []Record{impactRecord(at)}
+	advance(t, &e, &s, p, at)
+	if got := subjects(&s); len(got) != 3 || !strings.HasPrefix(got[2], "[CRITICAL]") {
+		t.Fatalf("live recurrence not announced as live news: %q", got)
+	}
+}
+
+func TestEngineLiveRecordsWithLongPollAreNotRetrospective(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultConfig()
+	cfg.Site, cfg.PollSeconds = "Test", 60
+	e, s := Engine{cfg}, State{Version: 1}
+	at := time.Now()
+	p := healthyProbe(at, 0)
+	p.Records = []Record{impactRecord(at.Add(-50 * time.Second))}
+	advance(t, &e, &s, p, at)
+	if got := subjects(&s); len(got) != 1 || !strings.HasPrefix(got[0], "[WARNING]") {
+		t.Fatalf("live record from the last poll labelled retrospective: %q", got)
+	}
+}
+
+func TestEngineUncertainInputsBlockHealth(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*Probe)
+	}{
+		{"service_status_unknown", func(p *Probe) { p.Active = "unknown" }},
+		{"journal_suppressed", func(p *Probe) {
+			p.Records = []Record{{TimeUS: time.Now().UnixMicro(), Message: "Suppressed 1234 messages from micrompx.service"}}
+		}},
+		{"gap_after_backfill", func(p *Probe) { p.Gap = true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := DefaultConfig()
+			cfg.Site = "Test"
+			e, s := Engine{cfg}, State{Version: 1}
+			at := time.Now()
+			advance(t, &e, &s, healthyProbe(at, 0), at)
+			at = at.Add(10 * time.Second)
+			advance(t, &e, &s, healthyProbe(at, 1920000), at)
+			if !s.observing() {
+				t.Fatal("healthy baseline not established")
+			}
+			at = at.Add(10 * time.Second)
+			p := healthyProbe(at, 2*1920000)
+			tc.change(p)
+			advance(t, &e, &s, p, at)
+			if s.observing() || s.Incident.ID != 0 {
+				t.Fatalf("uncertain input treated as health or as a fault: %+v", s.Incident)
+			}
+		})
+	}
+}
+
+func TestEngineRemindersAreDeduplicated(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultConfig()
+	cfg.Site = "Test"
+	e, s := Engine{cfg}, State{Version: 1}
+	at := time.Now()
+	p := healthyProbe(at, 0)
+	p.Active = "inactive"
+	advance(t, &e, &s, p, at)
+	for i := 1; i <= 190; i++ {
+		now := at.Add(time.Duration(i) * 10 * time.Second)
+		p := healthyProbe(now, 0)
+		p.Active = "inactive"
+		advance(t, &e, &s, p, now)
+	}
+	if got := subjects(&s); len(got) != 1 {
+		t.Fatalf("reminder queued while the incident's mail is still pending: %q", got)
+	}
+	s.Outbox = nil
+	for i := 191; i <= 290; i++ {
+		now := at.Add(time.Duration(i) * 10 * time.Second)
+		p := healthyProbe(now, 0)
+		p.Active = "inactive"
+		advance(t, &e, &s, p, now)
+	}
+	if got := subjects(&s); len(got) != 1 || !strings.HasPrefix(got[0], "[REMINDER CRITICAL]") {
+		t.Fatalf("missing single reminder after delivery: %q", got)
+	}
+}
+
 func ExampleEngine() {
 	cfg := DefaultConfig()
 	cfg.Site = "Example transmitter"

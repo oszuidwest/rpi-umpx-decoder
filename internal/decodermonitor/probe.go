@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const maxRecords = 512
@@ -44,16 +45,17 @@ type PCM struct {
 
 // Probe reports both journal continuity and playback progress independently.
 type Probe struct {
-	Bookmark     Bookmark // last record read, or the input bookmark if none
-	BootID       string
-	Monotonic    float64
-	Gap          bool // the saved overlap entry was not found; history may be missing
-	CaughtUp     bool
-	Active       string
-	MainPID      int
-	PCM          PCM
-	Records      []Record
-	JournalError bool
+	Bookmark   Bookmark // where the next read continues
+	BootID     string
+	Monotonic  float64
+	Gap        bool // overlap entry not found or journal unreadable; history may be missing
+	CaughtUp   bool
+	Active     string
+	MainPID    int
+	PCM        PCM
+	Records    []Record
+	JournalErr error // journal unreadable; Gap is set and Bookmark is the input
+	StatusErr  error // systemctl failed; Active is "unknown"
 }
 
 func (p *Probe) unverified() bool {
@@ -97,9 +99,9 @@ func (p LocalProbe) Read(ctx context.Context, bookmark Bookmark) (Probe, error) 
 	result.BootID = strings.TrimSpace(boot)
 	result.PCM = readPCM(root, p.PCMStatus)
 	statusCtx, statusCancel := context.WithTimeout(ctx, 2*time.Second)
-	result.Active, result.MainPID, err = serviceStatus(statusCtx)
+	result.Active, result.MainPID, result.StatusErr = serviceStatus(statusCtx)
 	statusCancel()
-	if err != nil {
+	if result.StatusErr != nil {
 		result.Active = "unknown"
 	}
 	// Journal failures must not blind the independent kernel playback check.
@@ -111,7 +113,7 @@ func (p LocalProbe) Read(ctx context.Context, bookmark Bookmark) (Probe, error) 
 	}
 	journalCancel()
 	if journalErr != nil {
-		result.Bookmark, result.Gap, result.JournalError = bookmark, true, true
+		result.Bookmark, result.Gap, result.JournalErr = bookmark, true, journalErr
 	} else {
 		result.Bookmark, result.Records = journal.Bookmark, journal.Records
 		result.Gap, result.CaughtUp = journal.Gap, journal.CaughtUp
@@ -122,7 +124,9 @@ func (p LocalProbe) Read(ctx context.Context, bookmark Bookmark) (Probe, error) 
 func readJournal(ctx context.Context, bookmark Bookmark) (Probe, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	args := []string{"--unit=micrompx.service", "--no-pager", "--quiet", "--all", "--output=json", "--no-tail"}
+	// Only MESSAGE plus the identity fields journalctl always adds: a large field,
+	// such as a coredump entry about the unit, must not exceed the line limit.
+	args := []string{"--unit=micrompx.service", "--no-pager", "--quiet", "--all", "--output=json", "--output-fields=MESSAGE", "--no-tail"}
 	if bookmark.Cursor != "" {
 		if len(bookmark.Cursor) > 4096 || strings.ContainsRune(bookmark.Cursor, 0) {
 			return Probe{}, fmt.Errorf("invalid saved journal cursor")
@@ -156,7 +160,7 @@ func readJournal(ctx context.Context, bookmark Bookmark) (Probe, error) {
 	}
 	if stderr.Len() != 0 {
 		// Includes permission/corruption warnings even if journalctl exits zero.
-		return Probe{}, fmt.Errorf("journal reader reported incomplete access or a diagnostic")
+		return Probe{}, fmt.Errorf("journal reader reported a diagnostic: %s", stderr.firstLine())
 	}
 	return result, nil
 }
@@ -164,7 +168,7 @@ func readJournal(ctx context.Context, bookmark Bookmark) (Probe, error) {
 func parseJournal(input io.Reader, bookmark Bookmark) (Probe, error) {
 	result := Probe{Bookmark: bookmark}
 	scanner := bufio.NewScanner(input)
-	scanner.Buffer(make([]byte, 4096), 128<<10)
+	scanner.Buffer(make([]byte, 4096), maxDocument)
 	verified, size := bookmark.Cursor == "", 0
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -206,14 +210,11 @@ func decodeRecord(line []byte) (Record, error) {
 		return Record{}, fmt.Errorf("invalid journal JSON")
 	}
 	text := func(key string) string { value, _ := fields[key].(string); return value }
-	record := Record{Cursor: text("__CURSOR"), BootID: text("_BOOT_ID"), Message: text("MESSAGE")}
+	record := Record{Cursor: text("__CURSOR"), BootID: text("_BOOT_ID"), Message: journalText(fields["MESSAGE"])}
 	var err error
 	record.TimeUS, err = strconv.ParseInt(text("__REALTIME_TIMESTAMP"), 10, 64)
 	if err != nil || record.TimeUS <= 0 || record.Cursor == "" || record.BootID == "" {
 		return Record{}, fmt.Errorf("journal entry lacks identity metadata")
-	}
-	if _, ok := fields["MESSAGE"].(string); !ok {
-		return Record{}, fmt.Errorf("journal message is not textual")
 	}
 	delete(fields, "__CURSOR")
 	canonical, err := json.Marshal(fields)
@@ -222,6 +223,28 @@ func decodeRecord(line []byte) (Record, error) {
 	}
 	record.Key = fmt.Sprintf("%x", sha256.Sum256(canonical))
 	return record, nil
+}
+
+// journalText decodes MESSAGE, which journalctl emits as a byte array when it
+// contains control characters or invalid UTF-8. Any other shape reads as empty
+// rather than failing the batch, so the cursor can still move past it.
+func journalText(value any) string {
+	switch value := value.(type) {
+	case string:
+		return value
+	case []any:
+		data := make([]byte, 0, len(value))
+		for _, item := range value {
+			number, _ := item.(json.Number)
+			b, err := strconv.ParseUint(number.String(), 10, 8)
+			if err != nil {
+				return ""
+			}
+			data = append(data, byte(b))
+		}
+		return strings.ToValidUTF8(string(data), "\uFFFD")
+	}
+	return ""
 }
 
 func serviceStatus(ctx context.Context) (active string, pid int, err error) {
@@ -291,6 +314,8 @@ func parseFields(text, separator string) map[string]string {
 	return values
 }
 
+// boundedBuffer keeps the first limit bytes of subprocess output and discards
+// the rest, so a large write still shows that output was produced.
 type boundedBuffer struct {
 	buffer bytes.Buffer
 	limit  int
@@ -299,8 +324,21 @@ type boundedBuffer struct {
 func (b *boundedBuffer) Len() int { return b.buffer.Len() }
 
 func (b *boundedBuffer) Write(data []byte) (int, error) {
-	if len(data) > b.limit-b.Len() {
-		return 0, fmt.Errorf("probe output exceeds size limit")
+	b.buffer.Write(data[:min(len(data), b.limit-b.Len())])
+	return len(data), nil
+}
+
+// firstLine returns a short, printable summary of the output for logs.
+func (b *boundedBuffer) firstLine() string {
+	line, _, _ := strings.Cut(b.buffer.String(), "\n")
+	line = strings.Map(func(r rune) rune {
+		if unicode.IsPrint(r) {
+			return r
+		}
+		return -1
+	}, line)
+	if len(line) > 200 {
+		line = strings.ToValidUTF8(line[:200], "")
 	}
-	return b.buffer.Write(data)
+	return line
 }

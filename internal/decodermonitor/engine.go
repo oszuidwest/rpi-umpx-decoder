@@ -24,6 +24,9 @@ type Incident struct {
 	Reason     string    `json:"reason"`
 	Records    int64     `json:"records"`
 	Historical bool      `json:"historical"`
+	// What the last notice announced; a difference is news, not a reminder.
+	NoticedSeverity   string `json:"noticed_severity"`
+	NoticedHistorical bool   `json:"noticed_historical"`
 }
 
 // Mail carries no credentials and has a stable ID for at-least-once delivery.
@@ -52,7 +55,7 @@ type State struct {
 	Stalled        int         `json:"-"`
 	Recent         []time.Time `json:"recent"`
 	Incident       Incident    `json:"incident"`
-	UnknownSince   time.Time   `json:"unknown_since"`
+	UnknownSince   time.Time   `json:"-"` // a restart starts a fresh grace period
 	UnknownNoticed bool        `json:"unknown_noticed"`
 	NextID         uint64      `json:"next_id"`
 	Outbox         []Mail      `json:"outbox"`
@@ -63,7 +66,7 @@ type Engine struct{ Config Config }
 
 func (s *State) nextID() uint64 { s.NextID++; return s.NextID }
 
-// observing reports whether the latest observations were complete and current.
+// observing reports whether the latest observations were complete.
 func (s *State) observing() bool { return s.UnknownSince.IsZero() }
 
 func (e *Engine) enqueue(s *State, now time.Time, subject, body string, incidentID uint64) error {
@@ -110,10 +113,9 @@ func (e *Engine) observed(s *State, now time.Time) error {
 	return nil
 }
 
-// Step applies one bounded read. The caller commits this state and its evidence
-// before another poll or notification delivery can acknowledge the cursor.
+// Step applies one bounded read without I/O. Store.Update persists the records
+// as evidence before it commits this state, so the cursor never runs ahead.
 func (e *Engine) Step(s *State, p *Probe, now time.Time) error {
-	previous := s.Incident.Severity
 	continuous := !s.LastObserved.IsZero() && now.Sub(s.LastObserved) >= 0 && now.Sub(s.LastObserved) <= 2*seconds(e.Config.PollSeconds)
 	if !continuous {
 		s.Incident.CleanSince = time.Time{}
@@ -146,7 +148,7 @@ func (e *Engine) Step(s *State, p *Probe, now time.Time) error {
 	if err := e.recover(s, now, progress); err != nil {
 		return err
 	}
-	return e.notice(s, previous, p.CaughtUp, now)
+	return e.notice(s, p.CaughtUp, now)
 }
 
 func (e *Engine) recover(s *State, now time.Time, playbackOK bool) error {
@@ -213,7 +215,8 @@ func (e *Engine) record(s *State, record Record, now time.Time) {
 	}
 	eventTime := time.UnixMicro(record.TimeUS)
 	// A replay/backfill records what happened, not a claim of a live outage.
-	historical := now.Sub(eventTime) > 30*time.Second || eventTime.After(now.Add(2*time.Second))
+	// Live records can be up to one poll old, plus slack for a late poll.
+	historical := now.Sub(eventTime) > max(30*time.Second, 2*seconds(e.Config.PollSeconds)) || eventTime.After(now.Add(2*time.Second))
 	e.impact(s, eventTime, "warning", "decoder reported buffer starvation or inserted silence", historical)
 	s.Incident.Records++
 	if starvation {
@@ -246,12 +249,12 @@ func (e *Engine) impact(s *State, when time.Time, severity, reason string, histo
 	s.Incident.CleanSince = time.Time{}
 }
 
-func (e *Engine) notice(s *State, previous string, caughtUp bool, now time.Time) error {
+func (e *Engine) notice(s *State, caughtUp bool, now time.Time) error {
 	i := &s.Incident
 	if i.ID == 0 || (!caughtUp && i.Historical) {
 		return nil
 	}
-	changed := i.LastNotice.IsZero() || previous != i.Severity
+	changed := i.LastNotice.IsZero() || i.NoticedSeverity != i.Severity || i.NoticedHistorical != i.Historical
 	reminder := s.observing() && now.Sub(i.LastNotice) >= seconds(e.Config.ReminderSeconds)
 	if !changed && (!reminder || slices.ContainsFunc(s.Outbox, func(m Mail) bool { return m.IncidentID == i.ID })) {
 		return nil
@@ -267,6 +270,6 @@ func (e *Engine) notice(s *State, previous string, caughtUp bool, now time.Time)
 	if err := e.enqueue(s, now, "["+label+"] MicroMPX decoder incident", body, i.ID); err != nil {
 		return err
 	}
-	i.LastNotice = now
+	i.LastNotice, i.NoticedSeverity, i.NoticedHistorical = now, i.Severity, i.Historical
 	return nil
 }

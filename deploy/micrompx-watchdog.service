@@ -1,6 +1,6 @@
 [Unit]
 Description=Local observe-only MicroMPX watchdog
-After=network-online.target
+After=network-online.target micrompx.service
 Wants=network-online.target
 
 [Service]
@@ -24,7 +24,6 @@ PrivateDevices=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-ReadOnlyPaths=/proc/asound
 RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 

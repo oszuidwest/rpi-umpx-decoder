@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func journalLine(t *testing.T, cursor, message, timestamp string) string {
@@ -56,15 +57,52 @@ func TestJournalBoundsAndMalformedRecords(t *testing.T) {
 		}
 	}
 	buffer := &boundedBuffer{limit: 2}
-	data := []byte{'a', 'b', 'c'}
-	if _, err := buffer.Write(data); err == nil {
-		t.Fatal("unbounded output")
+	if n, err := buffer.Write([]byte("abc")); err != nil || n != 3 || buffer.Len() != 2 {
+		t.Fatalf("over-limit output must be accepted but truncated: %d %v %d", n, err, buffer.Len())
 	}
-	if buffer.Len() != 0 {
-		t.Fatal("partial over-limit data retained")
-	}
-	if _, err := io.Copy(buffer, strings.NewReader("abc")); err == nil || buffer.Len() != 0 {
+	if _, err := io.Copy(buffer, strings.NewReader("abc")); err != nil || buffer.Len() != 2 {
 		t.Fatal("io.Copy bypassed the subprocess output bound")
+	}
+	diagnostic := &boundedBuffer{limit: 8192}
+	_, _ = diagnostic.Write([]byte("Journal file x.journal~ is truncated\x1b[0m, ignoring file.\nsecond line"))
+	if got := diagnostic.firstLine(); got != "Journal file x.journal~ is truncated[0m, ignoring file." {
+		t.Fatalf("diagnostic not summarized safely: %q", got)
+	}
+}
+
+func TestJournalNonTextualAndLargeMessagesAdvance(t *testing.T) {
+	t.Parallel()
+	byteArray := func(cursor, message string) string {
+		data, err := json.Marshal(map[string]any{"__CURSOR": cursor, "_BOOT_ID": "a-boot", "__REALTIME_TIMESTAMP": "1792397600000000", "MESSAGE": []byte(message)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// encoding/json writes []byte as base64; journalctl writes a number array.
+		var fields map[string]any
+		if err := json.Unmarshal(data, &fields); err != nil {
+			t.Fatal(err)
+		}
+		numbers := make([]int, 0, len(message))
+		for _, b := range []byte(message) {
+			numbers = append(numbers, int(b))
+		}
+		fields["MESSAGE"] = numbers
+		data, err = json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data) + "\n"
+	}
+	input := byteArray("colour", "\x1b[31mwarning: Buffer empty\x1b[0m") +
+		byteArray("binary", "\xffbad") +
+		`{"__CURSOR":"no-message","_BOOT_ID":"a-boot","__REALTIME_TIMESTAMP":"1792397600000000"}` + "\n" +
+		journalLine(t, "large", strings.Repeat("x", 200<<10), "1792397600000000")
+	result, err := parseJournal(strings.NewReader(input), Bookmark{})
+	if err != nil || !result.CaughtUp || len(result.Records) != 4 || result.Bookmark.Cursor != "large" {
+		t.Fatalf("unusual journal entries wedged the cursor: %+v %v", result.Bookmark, err)
+	}
+	if !strings.Contains(result.Records[0].Message, "Buffer empty") || !utf8.ValidString(result.Records[1].Message) || result.Records[2].Message != "" {
+		t.Fatalf("messages not decoded: %q", []string{result.Records[0].Message, result.Records[1].Message, result.Records[2].Message})
 	}
 }
 

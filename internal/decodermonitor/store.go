@@ -81,7 +81,7 @@ func OpenStore(cfg *Config) (*Store, error) {
 	return s, nil
 }
 
-// Close releases only watchdog-owned files; it never signals the decoder.
+// Close releases the lock and directory handles.
 func (s *Store) Close() error {
 	var result error
 	if s.evidence != nil {

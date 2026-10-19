@@ -50,7 +50,7 @@ func DefaultConfig() Config {
 	}
 }
 
-// LoadConfig reads an existing private configuration, without creating defaults.
+// LoadConfig never creates a missing file; omitted fields keep DefaultConfig values.
 func LoadConfig(path string) (Config, error) {
 	cfg := DefaultConfig()
 	if err := readPrivateJSON(path, &cfg); err != nil {

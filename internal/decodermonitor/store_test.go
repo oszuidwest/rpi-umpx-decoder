@@ -73,7 +73,7 @@ func TestStoreAtomicStateEvidenceAndRestart(t *testing.T) {
 
 func TestStoreFailedTransitionDoesNotAdvanceCursor(t *testing.T) {
 	t.Parallel()
-	_, store := testStore(t)
+	cfg, store := testStore(t)
 	at := time.Now()
 	if err := store.Update(nil, at, func(s *State) error { s.Bookmark.Cursor = "old"; return nil }); err != nil {
 		t.Fatal(err)
@@ -94,6 +94,17 @@ func TestStoreFailedTransitionDoesNotAdvanceCursor(t *testing.T) {
 	state, err = store.Snapshot()
 	if err != nil || state.Bookmark.Cursor != "old" {
 		t.Fatal("evidence failure advanced cursor")
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenStore(&cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	if state, err := reopened.Snapshot(); err != nil || state.Bookmark.Cursor != "old" {
+		t.Fatalf("evidence failure advanced the cursor on disk: %+v %v", state.Bookmark, err)
 	}
 }
 
@@ -255,6 +266,9 @@ func TestEvidenceRetentionDoesNotTouchUnownedFiles(t *testing.T) {
 	if err := os.WriteFile(other, []byte("not watchdog evidence"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chtimes(other, at.Add(-9*24*time.Hour), at.Add(-9*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.Prune(at); err != nil {
 		t.Fatal(err)
 	}
@@ -273,6 +287,9 @@ func TestStoreRewritesAfterAmbiguousCommit(t *testing.T) {
 	}
 	cfg, store := testStore(t)
 	at := time.Now()
+	if err := store.Update(nil, at, func(s *State) error { s.Bookmark.Cursor = "before"; return nil }); err != nil {
+		t.Fatal(err)
+	}
 	// Write and search permission allow the rename; without read permission
 	// the directory cannot be opened for its sync.
 	if err := os.Chmod(cfg.StateDir, 0o300); err != nil { //nolint:gosec // Owner-only directory without read permission.
@@ -288,10 +305,11 @@ func TestStoreRewritesAfterAmbiguousCommit(t *testing.T) {
 	if err := os.Chmod(cfg.StateDir, 0o700); err != nil { //nolint:gosec // Restores the private state directory mode.
 		t.Fatal(err)
 	}
-	if err := store.Update(nil, at, change); err != nil {
+	// The rename happened, so memory must follow disk rather than the old cache.
+	if err := store.Update(nil, at, func(*State) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if s, err := store.Snapshot(); err != nil || s.Bookmark.Cursor != "renamed" {
-		t.Fatalf("committed state lost: %+v %v", s, err)
+		t.Fatalf("memory diverged from the ambiguous commit: %+v %v", s.Bookmark, err)
 	}
 }
