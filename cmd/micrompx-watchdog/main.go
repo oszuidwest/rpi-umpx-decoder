@@ -48,7 +48,7 @@ func run(ctx context.Context, args []string, output, diagnostics io.Writer) int 
 		_, _ = fmt.Fprintln(diagnostics, err)
 		return 1
 	}
-	sender, recipients, err := decodermonitor.NewMailSender(&cfg)
+	sender, err := decodermonitor.NewMailSender(&cfg)
 	if err != nil {
 		_, _ = fmt.Fprintln(diagnostics, err)
 		return 1
@@ -71,7 +71,7 @@ func run(ctx context.Context, args []string, output, diagnostics io.Writer) int 
 			slog.Error("close watchdog state", "error", err)
 		}
 	}()
-	runner := decodermonitor.Runner{Config: cfg, Store: store, Probe: decodermonitor.LocalProbe{PCMStatus: cfg.PCMStatus}, Sender: sender, Recipients: recipients}
+	runner := decodermonitor.Runner{Config: cfg, Store: store, Probe: decodermonitor.LocalProbe{PCMStatus: cfg.PCMStatus}, Sender: sender}
 	if err := runner.Run(ctx); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return 0

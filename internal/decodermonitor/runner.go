@@ -13,30 +13,21 @@ import (
 
 // Sender permits mail delivery tests without contacting Microsoft Graph.
 type Sender interface {
-	SendMail(context.Context, []string, string, string) error
+	SendMail(ctx context.Context, subject, body string) error
 }
 
 // Runner has an independent mail worker so M365 cannot block local observation.
 type Runner struct {
-	Config     Config
-	Store      *Store
-	Probe      Prober
-	Sender     Sender
-	Recipients []string
+	Config Config
+	Store  *Store
+	Probe  Prober
+	Sender Sender
 }
 
 // Run owns and joins its worker. Errors stop only the watchdog, never MicroMPX.
 func (r *Runner) Run(ctx context.Context) error {
 	if r.Store == nil || r.Probe == nil || (r.Config.SendMail && r.Sender == nil) {
 		return fmt.Errorf("watchdog requires a store, probe and configured mail sender")
-	}
-	if err := r.Store.Update(nil, time.Now(), func(s *State) error {
-		// A restarted watchdog cannot count unobserved downtime toward recovery.
-		s.LastObserved, s.Incident.CleanSince = time.Time{}, time.Time{}
-		s.ObservationOK, s.Stalled = false, 0
-		return nil
-	}); err != nil {
-		return err
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	var workers sync.WaitGroup
@@ -86,15 +77,15 @@ func (r *Runner) poll(ctx context.Context) error {
 	now := time.Now()
 	engine := Engine{Config: r.Config}
 	if probeErr != nil {
-		if state.ObservationOK || state.UnknownSince.IsZero() {
+		if state.observing() {
 			slog.Warn("watchdog decoder observation unavailable", "error", probeErr)
 		}
 		return r.Store.Update(nil, now, func(s *State) error { return engine.Failed(s, now) })
 	}
-	if probe.JournalError && (state.ObservationOK || state.UnknownSince.IsZero()) {
+	if probe.JournalError && state.observing() {
 		slog.Warn("watchdog journal unavailable; kernel playback checks remain active")
 	}
-	if !probe.JournalError && probe.Continuity == "gap" {
+	if !probe.JournalError && probe.Gap {
 		slog.Warn("watchdog journal continuity lost; missing history cannot be reconstructed", "caught_up", probe.CaughtUp)
 	}
 	return r.Store.Update(probe.Records, now, func(s *State) error {
@@ -145,7 +136,7 @@ func (r *Runner) deliver(ctx context.Context, now time.Time) error {
 			subject = "[DELAYED] " + subject
 			body = "This queued notification describes the state at its detection time, not necessarily the current state.\n\n" + body
 		}
-		sendErr = r.Sender.SendMail(ctx, r.Recipients, subject, body)
+		sendErr = r.Sender.SendMail(ctx, subject, body)
 		if sendErr != nil {
 			// Graph/OAuth error responses may contain identities or credentials.
 			slog.Warn("watchdog M365 delivery deferred", "notification_id", mail.ID, "attempt", mail.Attempts+1)
@@ -162,8 +153,7 @@ func (r *Runner) deliver(ctx context.Context, now time.Time) error {
 			return nil
 		}
 		s.Outbox[0].Attempts++
-		backoff := min(300, 1<<min(s.Outbox[0].Attempts, 8))
-		s.Outbox[0].NextAttempt = now.Add(seconds(backoff))
+		s.Outbox[0].NextAttempt = now.Add(seconds(1 << min(s.Outbox[0].Attempts, 8)))
 		var rejection *deliveryError
 		if errors.As(sendErr, &rejection) && rejection.retryAfter.After(s.Outbox[0].NextAttempt) {
 			s.Outbox[0].NextAttempt = rejection.retryAfter
@@ -174,7 +164,7 @@ func (r *Runner) deliver(ctx context.Context, now time.Time) error {
 
 func (r *Runner) ready(now time.Time) bool {
 	s, err := r.Store.Snapshot()
-	if err != nil || !s.ObservationOK || s.LastObserved.IsZero() || now.Sub(s.LastObserved) > 2*seconds(r.Config.PollSeconds) {
+	if err != nil || !s.observing() || s.LastObserved.IsZero() || now.Sub(s.LastObserved) > 2*seconds(r.Config.PollSeconds) {
 		return false
 	}
 	// Known decoder faults do not masquerade as a dead monitoring pipeline.
@@ -182,14 +172,12 @@ func (r *Runner) ready(now time.Time) bool {
 }
 
 func (r *Runner) ping(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.Config.HeartbeatURL, http.NoBody)
 	if err != nil {
 		slog.Warn("watchdog heartbeat request rejected")
 		return
 	}
-	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: noRedirect}
 	// Administrator-configured HTTPS heartbeat; URL is never logged.
 	response, err := client.Do(req)
 	if err != nil {
@@ -201,20 +189,4 @@ func (r *Runner) ping(ctx context.Context) {
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		slog.Warn("watchdog heartbeat rejected", "status", response.StatusCode)
 	}
-}
-
-// NewMailSender uses the same Graph credential/config approach as zwfm-encoder,
-// but is self-contained and never fetches tokens until real mail is delivered.
-func NewMailSender(cfg *Config) (Sender, []string, error) {
-	if cfg == nil {
-		return nil, nil, fmt.Errorf("watchdog configuration is required")
-	}
-	if !cfg.SendMail {
-		return nil, nil, nil
-	}
-	email, err := LoadEmail(cfg.EmailFile)
-	if err != nil {
-		return nil, nil, err
-	}
-	return newGraphSender(&email), email.recipients(), nil
 }

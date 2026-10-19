@@ -15,16 +15,15 @@ var silenceSamples = regexp.MustCompile(`\b(\d+) samples silence played\b`)
 
 // Incident is persisted with the cursor and notifications in one state commit.
 type Incident struct {
-	ID          uint64    `json:"id"`
-	Opened      time.Time `json:"opened"`
-	LastImpact  time.Time `json:"last_impact"`
-	CleanSince  time.Time `json:"clean_since"`
-	LastNotice  time.Time `json:"last_notice"`
-	Severity    string    `json:"severity"`
-	Reason      string    `json:"reason"`
-	Records     int64     `json:"records"`
-	Historical  bool      `json:"historical"`
-	Unannounced bool      `json:"unannounced"`
+	ID         uint64    `json:"id"`
+	Opened     time.Time `json:"opened"`
+	LastImpact time.Time `json:"last_impact"`
+	CleanSince time.Time `json:"-"` // a restart cannot count unobserved time toward recovery
+	LastNotice time.Time `json:"last_notice"`
+	Severity   string    `json:"severity"`
+	Reason     string    `json:"reason"`
+	Records    int64     `json:"records"`
+	Historical bool      `json:"historical"`
 }
 
 // Mail carries no credentials and has a stable ID for at-least-once delivery.
@@ -40,50 +39,54 @@ type Mail struct {
 }
 
 // State includes both transport incidents and separate monitoring uncertainty.
+// The playback baseline is not persisted: after a restart the first poll is
+// never continuous, so the watchdog starts from a fresh baseline.
 type State struct {
 	Version        int         `json:"version"`
 	Bookmark       Bookmark    `json:"bookmark"`
-	BootID         string      `json:"boot_id"`
-	LastObserved   time.Time   `json:"last_observed"`
-	LastMonotonic  float64     `json:"last_monotonic"`
-	LastPCM        PCM         `json:"last_pcm"`
-	LastPID        int         `json:"last_pid"`
-	Stalled        int         `json:"stalled"`
+	BootID         string      `json:"-"`
+	LastObserved   time.Time   `json:"-"`
+	LastMonotonic  float64     `json:"-"`
+	LastPCM        PCM         `json:"-"`
+	LastPID        int         `json:"-"`
+	Stalled        int         `json:"-"`
 	Recent         []time.Time `json:"recent"`
 	Incident       Incident    `json:"incident"`
 	UnknownSince   time.Time   `json:"unknown_since"`
 	UnknownNoticed bool        `json:"unknown_noticed"`
-	ObservationOK  bool        `json:"observation_ok"`
 	NextID         uint64      `json:"next_id"`
 	Outbox         []Mail      `json:"outbox"`
 }
 
-// Engine contains no I/O and can replay incident logs without sending mail.
+// Engine contains no I/O.
 type Engine struct{ Config Config }
 
 func (s *State) nextID() uint64 { s.NextID++; return s.NextID }
 
-func (e *Engine) enqueue(s *State, now time.Time, subject, body string) error {
+// observing reports whether the latest observations were complete and current.
+func (s *State) observing() bool { return s.UnknownSince.IsZero() }
+
+func (e *Engine) enqueue(s *State, now time.Time, subject, body string, incidentID uint64) error {
 	if len(s.Outbox) >= maxOutbox {
 		return fmt.Errorf("watchdog outbox is full; cursor was not advanced")
 	}
 	id := s.nextID()
 	s.Outbox = append(s.Outbox, Mail{
 		ID: id, Created: now, Subject: subject + " - " + e.Config.Site,
-		Body:    fmt.Sprintf("Location: %s\nNotification ID: %d\nDetected: %s\n\n%s\n\nObserve-only: no restart, reset or audio change was performed.\nThis does not certify RF or audible programme health.\n", e.Config.Site, id, now.Format(time.RFC3339), body),
-		Preview: !e.Config.SendMail,
+		Body:       fmt.Sprintf("Location: %s\nNotification ID: %d\nDetected: %s\n\n%s\n\nObserve-only: no restart, reset or audio change was performed.\nThis does not certify RF or audible programme health.\n", e.Config.Site, id, now.Format(time.RFC3339), body),
+		Preview:    !e.Config.SendMail,
+		IncidentID: incidentID,
 	})
 	return nil
 }
 
 func (e *Engine) unknown(s *State, now time.Time) error {
-	s.ObservationOK = false
 	s.Incident.CleanSince = time.Time{}
 	if s.UnknownSince.IsZero() {
 		s.UnknownSince = now
 	}
 	if !s.UnknownNoticed && now.Sub(s.UnknownSince) >= seconds(e.Config.UnknownSeconds) {
-		if err := e.enqueue(s, now, "[UNKNOWN] Decoder monitoring unavailable", "The watchdog cannot currently establish complete, current decoder observations. Check journal access/continuity, playback status, storage and watchdog logs. No audio recovery has been inferred."); err != nil {
+		if err := e.enqueue(s, now, "[UNKNOWN] Decoder monitoring unavailable", "The watchdog cannot currently establish complete, current decoder observations. Check journal access/continuity, playback status, storage and watchdog logs. No audio recovery has been inferred.", 0); err != nil {
 			return err
 		}
 		s.UnknownNoticed = true
@@ -93,19 +96,17 @@ func (e *Engine) unknown(s *State, now time.Time) error {
 
 // Failed records uncertainty without clearing an existing decoder incident.
 func (e *Engine) Failed(s *State, now time.Time) error {
-	s.Stalled = 0
 	s.LastObserved = time.Time{}
 	return e.unknown(s, now)
 }
 
 func (e *Engine) observed(s *State, now time.Time) error {
 	if s.UnknownNoticed {
-		if err := e.enqueue(s, now, "[MONITORING OK] Decoder observations resumed", "Complete current monitoring observations have resumed. This is not an audio-incident recovery notification."); err != nil {
+		if err := e.enqueue(s, now, "[MONITORING OK] Decoder observations resumed", "Complete current monitoring observations have resumed. This is not an audio-incident recovery notification.", 0); err != nil {
 			return err
 		}
 	}
 	s.UnknownSince, s.UnknownNoticed = time.Time{}, false
-	s.ObservationOK = true
 	return nil
 }
 
@@ -138,31 +139,32 @@ func (e *Engine) Step(s *State, p *Probe, now time.Time) error {
 	} else if err := e.observed(s, now); err != nil {
 		return err
 	}
-	s.Bookmark = Bookmark{Cursor: p.Cursor, Key: p.Key}
+	s.Bookmark = p.Bookmark
 	s.BootID, s.LastPCM, s.LastPID = p.BootID, p.PCM, p.MainPID
 	s.LastObserved, s.LastMonotonic = now, p.Monotonic
-	recovered, err := e.recover(s, now, progress && fault == "")
-	if err != nil || recovered {
+	// playback only reports progress without a fault.
+	if err := e.recover(s, now, progress); err != nil {
 		return err
 	}
 	return e.notice(s, previous, p.CaughtUp, now)
 }
 
-func (e *Engine) recover(s *State, now time.Time, playbackOK bool) (bool, error) {
-	if s.Incident.ID != 0 && s.ObservationOK && playbackOK {
-		if s.Incident.CleanSince.IsZero() {
-			s.Incident.CleanSince = now
-		}
-		if now.Sub(s.Incident.CleanSince) >= seconds(e.Config.RecoverySeconds) {
-			body := fmt.Sprintf("Incident %d: no new decoder-impact messages during %s of current observations, with playback pointers progressing. Last impact: %s.\nThis is not a measurement of RF or programme audio.", s.Incident.ID, seconds(e.Config.RecoverySeconds), s.Incident.LastImpact.Format(time.RFC3339))
-			if err := e.enqueue(s, now, "[RECOVERY] Decoder impact observations cleared", body); err != nil {
-				return false, err
-			}
-			s.Incident, s.Recent = Incident{}, nil
-			return true, nil
-		}
+func (e *Engine) recover(s *State, now time.Time, playbackOK bool) error {
+	if s.Incident.ID == 0 || !s.observing() || !playbackOK {
+		return nil
 	}
-	return false, nil
+	if s.Incident.CleanSince.IsZero() {
+		s.Incident.CleanSince = now
+	}
+	if now.Sub(s.Incident.CleanSince) < seconds(e.Config.RecoverySeconds) {
+		return nil
+	}
+	body := fmt.Sprintf("Incident %d: no new decoder-impact messages during %s of current observations, with playback pointers progressing. Last impact: %s.\nThis is not a measurement of RF or programme audio.", s.Incident.ID, seconds(e.Config.RecoverySeconds), s.Incident.LastImpact.Format(time.RFC3339))
+	if err := e.enqueue(s, now, "[RECOVERY] Decoder impact observations cleared", body, 0); err != nil {
+		return err
+	}
+	s.Incident, s.Recent = Incident{}, nil
+	return nil
 }
 
 func (e *Engine) playback(s *State, p *Probe, continuous bool) (progress bool, fault string) {
@@ -229,7 +231,7 @@ func (e *Engine) record(s *State, record Record, now time.Time) {
 
 func (e *Engine) impact(s *State, when time.Time, severity, reason string, historical bool) {
 	if s.Incident.ID == 0 {
-		s.Incident = Incident{ID: s.nextID(), Opened: when, Severity: severity, Reason: reason, Historical: historical, Unannounced: true}
+		s.Incident = Incident{ID: s.nextID(), Opened: when, Severity: severity, Reason: reason, Historical: historical}
 	}
 	if severity == "critical" {
 		s.Incident.Severity = severity
@@ -249,17 +251,10 @@ func (e *Engine) notice(s *State, previous string, caughtUp bool, now time.Time)
 	if i.ID == 0 || (!caughtUp && i.Historical) {
 		return nil
 	}
-	changed := i.Unannounced || previous != i.Severity
-	reminder := s.ObservationOK && now.Sub(i.LastNotice) >= seconds(e.Config.ReminderSeconds)
-	if !changed && !reminder {
+	changed := i.LastNotice.IsZero() || previous != i.Severity
+	reminder := s.observing() && now.Sub(i.LastNotice) >= seconds(e.Config.ReminderSeconds)
+	if !changed && (!reminder || slices.ContainsFunc(s.Outbox, func(m Mail) bool { return m.IncidentID == i.ID })) {
 		return nil
-	}
-	if !changed {
-		for _, pending := range s.Outbox {
-			if pending.IncidentID == i.ID {
-				return nil
-			}
-		}
 	}
 	label := strings.ToUpper(i.Severity)
 	if i.Historical {
@@ -269,10 +264,9 @@ func (e *Engine) notice(s *State, previous string, caughtUp bool, now time.Time)
 		label = "REMINDER " + label
 	}
 	body := fmt.Sprintf("Incident %d\nReason: %s\nFirst impact: %s\nLast impact: %s\nImpact log records: %d (not independent physical dropouts)\nSeverity: %s\n", i.ID, i.Reason, i.Opened.Format(time.RFC3339), i.LastImpact.Format(time.RFC3339), i.Records, i.Severity)
-	if err := e.enqueue(s, now, "["+label+"] MicroMPX decoder incident", body); err != nil {
+	if err := e.enqueue(s, now, "["+label+"] MicroMPX decoder incident", body, i.ID); err != nil {
 		return err
 	}
-	s.Outbox[len(s.Outbox)-1].IncidentID = i.ID
-	i.LastNotice, i.Unannounced = now, false
+	i.LastNotice = now
 	return nil
 }

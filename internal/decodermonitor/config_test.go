@@ -25,8 +25,11 @@ func TestConfigDefaultsAndSafeValidation(t *testing.T) {
 	if cfg.SendMail || cfg.PollSeconds != 10 || cfg.RecoverySeconds != 900 {
 		t.Fatalf("unsafe defaults: %+v", cfg)
 	}
+	if cfg, err := LoadConfig(privateConfig(t, `{"site":"a","send_mail":null}`)); err != nil || cfg.SendMail {
+		t.Fatalf("null did not mean the safe zero value: %+v %v", cfg.SendMail, err)
+	}
 	for _, content := range []string{
-		`{"site":"a","site":"b"}`, `{"site":"a","send_mail":null}`, `{"site":"a","reset":true}`,
+		`{"site":"a","site":"b"}`, `{"site":"a","SITE":"b"}`, `{"site":"a","reset":true}`, `{"site":"a","poll_seconds":null}`,
 		`{"site":"a","poll_seconds":0}`, `{"site":"a","critical_count":1000000}`,
 		`{"site":"a","stalled_checks":1}`, `{"site":"a","state_dir":"/"}`,
 		`{"site":"a","pcm_status":"/dev/snd/pcmC1D0p"}`, `{"site":"a","send_mail":true}`,

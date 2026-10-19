@@ -29,12 +29,12 @@ func TestJournalOpaqueCursorAliasAndLostAnchor(t *testing.T) {
 	alias := journalLine(t, "different-opaque-alias", "Buffer filling", "1792397600000000")
 	next := journalLine(t, "next", "Buffer empty", "1792397610000000")
 	result, err := parseJournal(strings.NewReader(alias+next), bookmark)
-	if err != nil || result.Continuity != "ok" || !result.CaughtUp || len(result.Records) != 1 || result.Cursor != "next" {
+	if err != nil || result.Gap || !result.CaughtUp || len(result.Records) != 1 || result.Bookmark.Cursor != "next" {
 		t.Fatalf("opaque alias rejected: %+v %v", result, err)
 	}
 	for _, input := range []string{next, ""} {
 		result, err := parseJournal(strings.NewReader(input), bookmark)
-		if err != nil || result.Continuity != "gap" || result.CaughtUp {
+		if err != nil || !result.Gap || result.CaughtUp {
 			t.Fatalf("missing anchor was trusted: %+v %v", result, err)
 		}
 	}

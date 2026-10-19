@@ -79,7 +79,7 @@ func TestGraphProtocolAndLazyConstruction(t *testing.T) {
 	if calls != 0 {
 		t.Fatal("construction fetched a token")
 	}
-	if err := client.SendMail(t.Context(), config.recipients(), "Test", "Body"); err != nil {
+	if err := client.SendMail(t.Context(), "Test", "Body"); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 2 {
@@ -116,7 +116,7 @@ func TestGraphFailureDoesNotExposeSecrets(t *testing.T) {
 				}
 				return mailResponse(tc.mailCode, "sensitive upstream diagnostic"), nil
 			})
-			err := client.SendMail(t.Context(), config.recipients(), "Test", "Body")
+			err := client.SendMail(t.Context(), "Test", "Body")
 			if err == nil || strings.Contains(err.Error(), "sensitive") || strings.Contains(err.Error(), config.ClientSecret) {
 				t.Fatalf("failure was accepted or secret exposed: %v", err)
 			}
@@ -134,7 +134,7 @@ func TestGraphCancellationIncludesTokenAcquisition(t *testing.T) {
 	})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := client.SendMail(ctx, config.recipients(), "Test", "Body"); !errors.Is(err, context.Canceled) {
+	if err := client.SendMail(ctx, "Test", "Body"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("token acquisition ignored cancellation: %v", err)
 	}
 }
@@ -161,7 +161,7 @@ func TestGraphRedirectsNeverForwardCredentials(t *testing.T) {
 			defer server.Close()
 			client := newGraphSender(&config)
 			client.tokenURL, client.mailURL = server.URL+"/token", server.URL+"/mail"
-			if err := client.SendMail(t.Context(), config.recipients(), "Test", "Body"); err == nil {
+			if err := client.SendMail(t.Context(), "Test", "Body"); err == nil {
 				t.Fatal("redirect accepted as delivery")
 			}
 			want := int32(1)
@@ -200,7 +200,7 @@ func TestRetryAfterPersistsAcrossRestart(t *testing.T) {
 				response.Header.Set("Retry-After", tc.retry)
 				return response, nil
 			})
-			runner := Runner{Config: cfg, Store: store, Sender: client, Recipients: config.recipients()}
+			runner := Runner{Config: cfg, Store: store, Sender: client}
 			if err := runner.deliver(t.Context(), at); err != nil {
 				t.Fatal(err)
 			}
@@ -229,7 +229,7 @@ func TestEmailConfigAndCheckModeStayOffline(t *testing.T) {
 	}
 	cfg := DefaultConfig()
 	cfg.SendMail, cfg.EmailFile = true, privateConfig(t, string(data))
-	if sender, recipients, err := NewMailSender(&cfg); err != nil || sender == nil || len(recipients) != 2 {
+	if sender, err := NewMailSender(&cfg); err != nil || sender == nil || len(sender.(*graphSender).recipients) != 2 {
 		t.Fatalf("valid offline configuration rejected: %v", err)
 	}
 	for _, tc := range []struct {
@@ -251,5 +251,25 @@ func TestEmailConfigAndCheckModeStayOffline(t *testing.T) {
 				t.Fatalf("invalid settings accepted or secret echoed: %v", err)
 			}
 		})
+	}
+}
+
+func TestRetryAfterBounds(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	for value, want := range map[string]time.Duration{
+		"120": 120 * time.Second, "0": 0, "-9223372037": 0, "999999999": 24 * time.Hour, "soon": 0,
+		now.Add(-time.Minute).UTC().Format(http.TimeFormat): 0,
+	} {
+		var rejection *deliveryError
+		response := mailResponse(http.StatusTooManyRequests, "")
+		response.Header.Set("Retry-After", value)
+		_ = response.Body.Close()
+		if !errors.As(rejected(response, now), &rejection) {
+			t.Fatal("rejection lost its type")
+		}
+		if got := rejection.retryAfter; (want == 0 && !got.IsZero()) || (want != 0 && !got.Equal(now.Add(want))) {
+			t.Errorf("Retry-After %q: got %v, want +%v", value, got, want)
+		}
 	}
 }

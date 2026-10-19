@@ -8,8 +8,8 @@ import (
 )
 
 func healthyProbe(at time.Time, frame uint64) *Probe {
-	return &Probe{BootID: "boot-a", TimeUS: at.UnixMicro(), Monotonic: float64(at.Unix()),
-		Continuity: "ok", CaughtUp: true, Active: "active", MainPID: 100,
+	return &Probe{BootID: "boot-a", Monotonic: float64(at.Unix()),
+		CaughtUp: true, Active: "active", MainPID: 100,
 		PCM: PCM{State: "RUNNING", Owner: 100, Trigger: "stream-a", Hardware: frame, Applied: frame + 4096}}
 }
 
@@ -59,7 +59,7 @@ func TestEngineImpactEscalationAndNoFalseRecovery(t *testing.T) {
 		p.CaughtUp = false
 		advance(t, &e, &s, p, now)
 	}
-	if s.ObservationOK || !s.Incident.CleanSince.IsZero() || !s.UnknownNoticed {
+	if s.observing() || !s.Incident.CleanSince.IsZero() || !s.UnknownNoticed {
 		t.Fatalf("incomplete observations allowed recovery: %+v", s)
 	}
 	for i := 51; i <= 141; i++ {
@@ -88,7 +88,7 @@ func TestEngineKernelWatchdogWithoutJournalOrHTTP(t *testing.T) {
 		{"application_stops", func(p *Probe) { p.PCM.Applied = 4096 }},
 		{"hardware_stops", func(p *Probe) { p.PCM.Hardware = 0 }},
 		{"both_stop", func(p *Probe) { p.PCM.Applied, p.PCM.Hardware = 4096, 0 }},
-		{"journal_also_unavailable", func(p *Probe) { p.PCM.Applied = 4096; p.CaughtUp = false; p.Continuity = "gap" }},
+		{"journal_also_unavailable", func(p *Probe) { p.PCM.Applied = 4096; p.CaughtUp = false; p.Gap = true }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -129,7 +129,7 @@ func TestEngineIgnoresFECAndZeroSilence(t *testing.T) {
 		p.Records = []Record{{TimeUS: now.UnixMicro(), Message: "Recovered packet using FEC"}, {TimeUS: now.UnixMicro(), Message: "0 samples silence played"}}
 		advance(t, &e, &s, p, now)
 	}
-	if len(s.Outbox) != 0 || s.Incident.ID != 0 || !s.ObservationOK {
+	if len(s.Outbox) != 0 || s.Incident.ID != 0 || !s.observing() {
 		t.Fatalf("clean decoder alarmed: %+v", s)
 	}
 }
@@ -143,14 +143,14 @@ func TestEnginePlaybackReopenAndCounterWrap(t *testing.T) {
 	advance(t, &e, &s, healthyProbe(at, ^uint64(0)-10000), at)
 	at = at.Add(10 * time.Second)
 	advance(t, &e, &s, healthyProbe(at, 10000), at)
-	if s.Incident.ID != 0 || !s.ObservationOK {
+	if s.Incident.ID != 0 || !s.observing() {
 		t.Fatal("counter wrap became a stall")
 	}
 	at = at.Add(10 * time.Second)
 	p := healthyProbe(at, 0)
 	p.PCM.Trigger = "reopened"
 	advance(t, &e, &s, p, at)
-	if s.Incident.ID != 0 || s.ObservationOK {
+	if s.Incident.ID != 0 || s.observing() {
 		t.Fatal("reopen must establish a fresh baseline, not alarm or recover")
 	}
 }
@@ -162,10 +162,10 @@ func TestEngineUnknownGapAndDelayedBackfill(t *testing.T) {
 	e, s := Engine{cfg}, State{Version: 1}
 	at := time.Now()
 	p := healthyProbe(at, 0)
-	p.Continuity, p.CaughtUp = "gap", false
+	p.Gap, p.CaughtUp = true, false
 	p.Records = []Record{impactRecord(at.Add(-10 * time.Minute))}
 	advance(t, &e, &s, p, at)
-	if len(s.Outbox) != 0 || s.ObservationOK {
+	if len(s.Outbox) != 0 || s.observing() {
 		t.Fatal("backfill generated a live notice or false health")
 	}
 	at = at.Add(10 * time.Second)
@@ -215,7 +215,7 @@ func TestEngineFaultsAndMissingTelemetry(t *testing.T) {
 			if s.Incident.Severity != tc.want {
 				t.Fatalf("got %s; want %s", s.Incident.Severity, tc.want)
 			}
-			if tc.want == "" && s.ObservationOK {
+			if tc.want == "" && s.observing() {
 				t.Fatal("unverified telemetry was considered healthy")
 			}
 		})

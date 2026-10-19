@@ -15,7 +15,7 @@ type fakeSender struct {
 	subject string
 }
 
-func (f *fakeSender) SendMail(_ context.Context, _ []string, subject, _ string) error {
+func (f *fakeSender) SendMail(_ context.Context, subject, _ string) error {
 	f.calls++
 	f.subject = subject
 	return f.err
@@ -33,7 +33,7 @@ func TestMailFailureRetryAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	sender := &fakeSender{err: errors.New("sensitive OAuth response must not be persisted")}
-	r := Runner{Config: cfg, Store: store, Sender: sender, Recipients: []string{"recipient@example.invalid"}}
+	r := Runner{Config: cfg, Store: store, Sender: sender}
 	if err := r.deliver(t.Context(), at); err != nil {
 		t.Fatal(err)
 	}

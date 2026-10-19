@@ -6,18 +6,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"io/fs"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 )
 
 var evidenceName = regexp.MustCompile(`^[0-9a-f]{64}\.json$`)
+
+// transactionName is the single in-progress write per directory. The exclusive
+// lock and mu make the watchdog its only writer, so a leftover from a crash is
+// removed and recreated.
+const transactionName = ".watchdog.tmp"
 
 // Store commits cursor, incident and outbox together, using fsync + atomic rename.
 // Evidence is durable BEFORE the cursor advances. A crash in between may replay
@@ -29,13 +32,13 @@ type Store struct {
 	lock        *os.File
 	retention   time.Duration
 	maxEvidence int64
+	loaded      bool   // false after a failed write: disk is authoritative again
+	state       State  // last committed state, including fields kept only in memory
+	saved       []byte // durably committed encoding of state; nil forces a rewrite
 }
 
 // OpenStore exclusively owns a dedicated private state directory for one site.
 func OpenStore(cfg *Config) (*Store, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("watchdog configuration is required")
-	}
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create watchdog state directory: %w", err)
 	}
@@ -71,14 +74,7 @@ func OpenStore(cfg *Config) (*Store, error) {
 	if err := syncRoot(root); err != nil {
 		return nil, err
 	}
-	// The exclusive lock makes all watchdog transaction files from prior runs
-	// orphaned. Interrupted writes must not escape the evidence byte quota.
-	for _, dir := range []*os.Root{root, s.evidence} {
-		if err := cleanTransactions(dir); err != nil {
-			return nil, err
-		}
-	}
-	if _, err := s.load(); err != nil {
+	if _, err := s.current(); err != nil {
 		return nil, err
 	}
 	ok = true
@@ -109,13 +105,9 @@ func (s *Store) load() (State, error) {
 		return State{}, fmt.Errorf("open watchdog state: %w", err)
 	}
 	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
-		return State{}, fmt.Errorf("watchdog state is not a private regular file")
-	}
-	data, err := io.ReadAll(io.LimitReader(f, maxDocument+1))
-	if err != nil || len(data) > maxDocument {
-		return State{}, fmt.Errorf("watchdog state cannot be read or exceeds size limit")
+	data, err := readPrivate(f, maxDocument)
+	if err != nil {
+		return State{}, fmt.Errorf("watchdog state: %w", err)
 	}
 	var state State
 	if err := json.Unmarshal(data, &state); err != nil || state.Version != 1 || len(state.Outbox) > maxOutbox {
@@ -124,18 +116,35 @@ func (s *Store) load() (State, error) {
 	return state, nil
 }
 
-// Snapshot reads authoritative state, including an ambiguous prior fsync result.
+// current returns a copy of the committed state. After a failed write it
+// re-reads disk, because the rename may have succeeded before the error. The
+// next Update then rewrites the file, re-establishing its durability.
+func (s *Store) current() (State, error) {
+	if !s.loaded {
+		state, err := s.load()
+		if err != nil {
+			return State{}, err
+		}
+		s.state, s.saved, s.loaded = state, nil, true
+	}
+	state := s.state
+	state.Recent, state.Outbox = slices.Clone(s.state.Recent), slices.Clone(s.state.Outbox)
+	return state, nil
+}
+
+// Snapshot returns the committed state.
 func (s *Store) Snapshot() (State, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.load()
+	return s.current()
 }
 
 // Update persists one transition and its notifications without network I/O.
+// The file is rewritten only when its durable fields changed.
 func (s *Store) Update(records []Record, now time.Time, change func(*State) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	state, err := s.load()
+	state, err := s.current()
 	if err != nil {
 		return err
 	}
@@ -154,7 +163,14 @@ func (s *Store) Update(records []Record, now time.Time, change func(*State) erro
 	if len(data) > maxDocument {
 		return fmt.Errorf("watchdog state exceeds size limit")
 	}
-	return atomicWrite(s.root, "state.json", data)
+	if !bytes.Equal(data, s.saved) {
+		if err := atomicWrite(s.root, "state.json", data); err != nil {
+			s.loaded = false
+			return err
+		}
+	}
+	s.state, s.saved = state, data
+	return nil
 }
 
 func (s *Store) writeEvidence(records []Record, now time.Time) error {
@@ -183,12 +199,7 @@ func (s *Store) writeEvidence(records []Record, now time.Time) error {
 }
 
 func (s *Store) trimEvidence(now time.Time, incoming int64) error {
-	dir, err := s.evidence.Open(".")
-	if err != nil {
-		return fmt.Errorf("open evidence listing: %w", err)
-	}
-	defer func() { _ = dir.Close() }()
-	entries, err := dir.ReadDir(-1)
+	entries, err := fs.ReadDir(s.evidence.FS(), ".")
 	if err != nil {
 		return fmt.Errorf("list evidence: %w", err)
 	}
@@ -231,40 +242,19 @@ func (s *Store) trimEvidence(now time.Time, incoming int64) error {
 	return nil
 }
 
-func cleanTransactions(root *os.Root) error {
-	dir, err := root.Open(".")
-	if err != nil {
-		return fmt.Errorf("open watchdog transaction directory: %w", err)
-	}
-	defer func() { _ = dir.Close() }()
-	entries, err := dir.ReadDir(-1)
-	if err != nil {
-		return fmt.Errorf("list watchdog transactions: %w", err)
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if !entry.Type().IsRegular() || !strings.HasPrefix(name, ".watchdog-") || !strings.HasSuffix(name, ".tmp") {
-			continue
-		}
-		if err := root.Remove(name); err != nil {
-			return fmt.Errorf("remove interrupted watchdog transaction: %w", err)
-		}
-	}
-	return syncRoot(root)
-}
-
 func atomicWrite(root *os.Root, name string, data []byte) (retErr error) {
-	// The directory is service-owned and private. Temp files use O_EXCL and
-	// 0600; the final rename and directory sync follow the encoder config writer.
-	tmp, err := os.CreateTemp(root.Name(), ".watchdog-*.tmp")
+	// Never reuse a leftover: its mode or a symlink would carry over.
+	if err := root.Remove(transactionName); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove interrupted watchdog transaction: %w", err)
+	}
+	tmp, err := root.OpenFile(transactionName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("create watchdog transaction: %w", err)
 	}
-	tempName := filepath.Base(tmp.Name())
 	defer func() {
 		_ = tmp.Close()
 		if retErr != nil {
-			_ = root.Remove(tempName)
+			_ = root.Remove(transactionName)
 		}
 	}()
 	if _, err := tmp.Write(data); err != nil {
@@ -276,7 +266,7 @@ func atomicWrite(root *os.Root, name string, data []byte) (retErr error) {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close watchdog transaction: %w", err)
 	}
-	if err := root.Rename(tempName, name); err != nil {
+	if err := root.Rename(transactionName, name); err != nil {
 		return fmt.Errorf("commit watchdog transaction: %w", err)
 	}
 	return syncRoot(root)

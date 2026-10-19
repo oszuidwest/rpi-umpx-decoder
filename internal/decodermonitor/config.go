@@ -3,8 +3,8 @@
 package decodermonitor
 
 import (
-	"bytes"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -64,9 +64,6 @@ func LoadConfig(path string) (Config, error) {
 
 // Validate rejects settings that could disable bounds or confuse audio identity.
 func (c *Config) Validate() error {
-	if c == nil {
-		return fmt.Errorf("watchdog configuration is required")
-	}
 	if strings.TrimSpace(c.Site) == "" || len(c.Site) > 100 || strings.ContainsAny(c.Site, "\r\n\x00") {
 		return fmt.Errorf("site must be a non-empty single line of at most 100 bytes")
 	}
@@ -79,15 +76,22 @@ func (c *Config) Validate() error {
 	if c.SendMail && !filepath.IsAbs(c.EmailFile) {
 		return fmt.Errorf("email_file must be an absolute path when send_mail is enabled")
 	}
-	for name, limit := range map[string][3]int{
-		"poll_seconds": {c.PollSeconds, 10, 60}, "recovery_seconds": {c.RecoverySeconds, 60, 86400},
-		"reminder_seconds": {c.ReminderSeconds, 60, 86400}, "unknown_seconds": {c.UnknownSeconds, c.PollSeconds, 3600},
-		"critical_count": {c.CriticalCount, 2, 100}, "critical_window_seconds": {c.CriticalWindowSecs, 10, 3600},
-		"stalled_checks": {c.StalledChecks, 2, 10}, "retention_days": {c.RetentionDays, 1, 90},
-		"evidence_mib": {c.EvidenceMiB, 4, 1024},
+	for _, b := range []struct {
+		name          string
+		value, lo, hi int
+	}{
+		{"poll_seconds", c.PollSeconds, 10, 60},
+		{"recovery_seconds", c.RecoverySeconds, 60, 86400},
+		{"reminder_seconds", c.ReminderSeconds, 60, 86400},
+		{"unknown_seconds", c.UnknownSeconds, c.PollSeconds, 3600},
+		{"critical_count", c.CriticalCount, 2, 100},
+		{"critical_window_seconds", c.CriticalWindowSecs, 10, 3600},
+		{"stalled_checks", c.StalledChecks, 2, 10},
+		{"retention_days", c.RetentionDays, 1, 90},
+		{"evidence_mib", c.EvidenceMiB, 4, 1024},
 	} {
-		if limit[0] < limit[1] || limit[0] > limit[2] {
-			return fmt.Errorf("%s must be between %d and %d", name, limit[1], limit[2])
+		if b.value < b.lo || b.value > b.hi {
+			return fmt.Errorf("%s must be between %d and %d", b.name, b.lo, b.hi)
 		}
 	}
 	if c.HeartbeatURL != "" {
@@ -111,81 +115,40 @@ func LoadEmail(path string) (EmailConfig, error) {
 	return cfg, nil
 }
 
+// readPrivateJSON rejects duplicate, unknown and case-variant keys.
 func readPrivateJSON(path string, target any) error {
 	f, err := os.Open(path) //nolint:gosec // Administrator-selected configuration path, never remote input.
 	if err != nil {
 		return fmt.Errorf("open configuration: %w", err)
 	}
 	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
+	data, err := readPrivate(f, 64<<10)
 	if err != nil {
-		return fmt.Errorf("stat configuration: %w", err)
+		return fmt.Errorf("configuration: %w", err)
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("configuration must be a regular file readable only by its owner (mode 0600)")
-	}
-	data, err := io.ReadAll(io.LimitReader(f, 65537))
-	if err != nil || len(data) > 65536 {
-		return fmt.Errorf("configuration cannot be read or exceeds 64 KiB")
-	}
-	if err := validateJSON(data); err != nil {
-		return err
-	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(target); err != nil {
+	if err := jsonv2.Unmarshal(data, target, jsonv2.RejectUnknownMembers(true)); err != nil {
 		// Decoder errors can quote a secret supplied with the wrong type.
-		return fmt.Errorf("configuration has unknown fields or invalid value types")
+		return fmt.Errorf("configuration must be one JSON object without duplicate or unknown fields, with valid value types")
 	}
 	return nil
 }
 
-func validateJSON(data []byte) error {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	if err := walkJSON(dec); err != nil {
-		return fmt.Errorf("configuration must be an object without duplicate keys or null values")
+// readPrivate reads an owner-only regular file of at most limit bytes.
+func readPrivate(f *os.File, limit int64) ([]byte, error) {
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("must be a regular file readable only by its owner (mode 0600)")
 	}
-	if _, err := dec.Token(); err != io.EOF {
-		return fmt.Errorf("configuration must contain exactly one JSON object")
-	}
-	if len(bytes.TrimSpace(data)) == 0 || bytes.TrimSpace(data)[0] != '{' {
-		return fmt.Errorf("configuration must be an object")
-	}
-	return nil
+	return readAtMost(f, limit)
 }
 
-func walkJSON(dec *json.Decoder) error {
-	token, err := dec.Token()
-	if err != nil || token == nil {
-		return fmt.Errorf("invalid JSON")
+// readAtMost fails instead of silently truncating input longer than limit.
+func readAtMost(r io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err == nil && int64(len(data)) > limit {
+		err = errors.New("exceeds size limit")
 	}
-	switch token {
-	case json.Delim('{'):
-		seen := make(map[string]bool)
-		for dec.More() {
-			key, err := dec.Token()
-			if err != nil {
-				return err
-			}
-			name, ok := key.(string)
-			if !ok || seen[name] {
-				return fmt.Errorf("duplicate key")
-			}
-			seen[name] = true
-			if err := walkJSON(dec); err != nil {
-				return err
-			}
-		}
-		_, err = dec.Token()
-	case json.Delim('['):
-		for dec.More() {
-			if err := walkJSON(dec); err != nil {
-				return err
-			}
-		}
-		_, err = dec.Token()
-	}
-	return err
+	return data, err
 }
 
 func seconds(n int) time.Duration { return time.Duration(n) * time.Second }

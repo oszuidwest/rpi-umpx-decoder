@@ -68,22 +68,43 @@ func (c *EmailConfig) recipients() []string {
 	return result
 }
 
+// NewMailSender uses the same Graph credential/config approach as zwfm-encoder,
+// but is self-contained and never fetches tokens until real mail is delivered.
+func NewMailSender(cfg *Config) (Sender, error) {
+	if !cfg.SendMail {
+		return nil, nil
+	}
+	email, err := LoadEmail(cfg.EmailFile)
+	if err != nil {
+		return nil, err
+	}
+	return newGraphSender(&email), nil
+}
+
+// noRedirect never forwards credentials, tokens or heartbeat URLs elsewhere.
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
 type graphSender struct {
-	config   EmailConfig
-	client   *http.Client
-	tokenURL string
-	mailURL  string
+	config     EmailConfig
+	recipients []graphRecipient
+	client     *http.Client
+	tokenURL   string
+	mailURL    string
 }
 
 func newGraphSender(cfg *EmailConfig) *graphSender {
+	var recipients []graphRecipient
+	for _, address := range cfg.recipients() {
+		var recipient graphRecipient
+		recipient.EmailAddress.Address = address
+		recipients = append(recipients, recipient)
+	}
 	return &graphSender{
-		config: *cfg,
-		client: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			// Never forward credentials/tokens, even to another HTTPS location.
-			return http.ErrUseLastResponse
-		}},
-		tokenURL: "https://login.microsoftonline.com/" + cfg.TenantID + "/oauth2/v2.0/token",
-		mailURL:  "https://graph.microsoft.com/v1.0/users/" + url.PathEscape(cfg.FromAddress) + "/sendMail",
+		config:     *cfg,
+		recipients: recipients,
+		client:     &http.Client{Timeout: 30 * time.Second, CheckRedirect: noRedirect},
+		tokenURL:   "https://login.microsoftonline.com/" + cfg.TenantID + "/oauth2/v2.0/token",
+		mailURL:    "https://graph.microsoft.com/v1.0/users/" + url.PathEscape(cfg.FromAddress) + "/sendMail",
 	}
 }
 
@@ -105,20 +126,9 @@ type graphMessage struct {
 // SendMail performs one attempt. The runner durably retries failures, including
 // Retry-After, rather than sleeping inside the observation loop or losing mail.
 // Tokens are short-lived, fetched per attempt and never persisted or logged.
-func (c *graphSender) SendMail(ctx context.Context, recipients []string, subject, body string) error {
-	if len(recipients) == 0 {
-		return fmt.Errorf("M365 requires recipients")
-	}
-	message := graphMessage{Subject: subject}
+func (c *graphSender) SendMail(ctx context.Context, subject, body string) error {
+	message := graphMessage{Subject: subject, ToRecipients: c.recipients}
 	message.Body.ContentType, message.Body.Content = "Text", body
-	for _, address := range recipients {
-		if !bareAddress(address) {
-			return fmt.Errorf("M365 recipient is invalid")
-		}
-		var recipient graphRecipient
-		recipient.EmailAddress.Address = address
-		message.ToRecipients = append(message.ToRecipients, recipient)
-	}
 	data, err := json.Marshal(struct {
 		Message graphMessage `json:"message"`
 	}{message})
@@ -165,8 +175,8 @@ func (c *graphSender) token(ctx context.Context) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", rejected(resp, time.Now())
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 65537))
-	if err != nil || len(data) > 65536 {
+	data, err := readAtMost(resp.Body, 64<<10)
+	if err != nil {
 		return "", fmt.Errorf("M365 token response unavailable or oversized")
 	}
 	var token struct {
@@ -182,7 +192,6 @@ func (c *graphSender) token(ctx context.Context) (string, error) {
 }
 
 func (c *graphSender) do(req *http.Request) (*http.Response, error) {
-	// Endpoints are fixed to Microsoft HTTPS; test overrides are private.
 	resp, err := c.client.Do(req)
 	if err != nil {
 		if req.Context().Err() != nil {
@@ -203,20 +212,18 @@ func (e *deliveryError) Error() string {
 	return fmt.Sprintf("M365 request rejected (HTTP %d)", e.status)
 }
 
+// rejected keeps a Retry-After deadline, bounded to 24 hours.
 func rejected(resp *http.Response, now time.Time) error {
 	result := &deliveryError{status: resp.StatusCode}
 	value := resp.Header.Get("Retry-After")
-	if delay, err := strconv.ParseInt(value, 10, 64); err == nil && delay > 0 {
-		result.retryAfter = now.Add(time.Duration(min(delay, 86400)) * time.Second)
-	} else if at, err := http.ParseTime(value); err == nil && at.After(now) {
-		result.retryAfter = minTime(at, now.Add(24*time.Hour))
+	var delay time.Duration
+	if secs, err := strconv.ParseInt(value, 10, 64); err == nil && secs > 0 {
+		delay = time.Duration(min(secs, 86400)) * time.Second
+	} else if at, err := http.ParseTime(value); err == nil {
+		delay = at.Sub(now)
+	}
+	if delay > 0 {
+		result.retryAfter = now.Add(min(delay, 24*time.Hour))
 	}
 	return result
-}
-
-func minTime(a, b time.Time) time.Time {
-	if a.Before(b) {
-		return a
-	}
-	return b
 }
