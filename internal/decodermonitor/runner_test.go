@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -270,4 +272,57 @@ func TestFullOutboxDoesNotStopObservation(t *testing.T) {
 			t.Fatalf("full outbox committed or dropped state: reads=%d incident=%+v outbox=%d %v", probe.reads, s.Incident, len(s.Outbox), err)
 		}
 	})
+}
+
+type gapProbe struct{ inactive bool }
+
+func (p *gapProbe) Read(_ context.Context, _ Bookmark) (Probe, error) {
+	probe := *healthyProbe(time.Now(), 0)
+	probe.Gap = true
+	if p.inactive {
+		probe.Active = "inactive"
+	}
+	return probe, nil
+}
+
+// Not parallel: it captures the process-wide default logger.
+func TestJournalGapIsLoggedWhenItsObservationCommits(t *testing.T) {
+	var logs strings.Builder
+	previous, writer, flags := slog.Default(), log.Writer(), log.Flags()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() {
+		// slog.SetDefault also redirects the standard logger.
+		slog.SetDefault(previous)
+		log.SetOutput(writer)
+		log.SetFlags(flags)
+	})
+	cfg, store := testStore(t)
+	at := time.Now()
+	if err := store.Update(nil, at, func(s *State) error {
+		for i := range maxOutbox {
+			s.Outbox = append(s.Outbox, Mail{ID: uint64(i) + 1, Preview: true, Created: at})
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	probe := &gapProbe{inactive: true}
+	r := Runner{Config: cfg, Store: store, Probe: probe}
+	if err := r.poll(t.Context()); !errors.Is(err, errOutboxFull) {
+		t.Fatalf("expected a rejected poll: %v", err)
+	}
+	if strings.Contains(logs.String(), "continuity lost") {
+		t.Fatal("gap logged for an observation that was not committed")
+	}
+	if err := store.Update(nil, at, func(s *State) error { s.Outbox = nil; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	probe.inactive = false
+	r.blocked = true // as Run leaves it after the rejected poll
+	if err := r.poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(logs.String(), "continuity lost"); got != 1 {
+		t.Fatalf("committed gap logged %d times", got)
+	}
 }

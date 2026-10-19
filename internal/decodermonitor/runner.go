@@ -88,11 +88,19 @@ func (r *Runner) poll(ctx context.Context) error {
 	}
 	now := time.Now()
 	engine := Engine{Config: r.Config}
+	// Diagnostics follow a committed transition, so a poll rejected by a full
+	// outbox neither repeats nor loses them.
 	if probeErr != nil {
-		if state.observing() {
+		err := r.Store.Update(nil, now, func(s *State) error { return engine.Failed(s, now) })
+		if err == nil && state.observing() {
 			slog.Warn("watchdog decoder observation unavailable", "error", probeErr)
 		}
-		return r.Store.Update(nil, now, func(s *State) error { return engine.Failed(s, now) })
+		return err
+	}
+	if err := r.Store.Update(probe.Records, now, func(s *State) error {
+		return engine.Step(s, &probe, now)
+	}); err != nil {
+		return err
 	}
 	if probe.JournalErr != nil && state.observing() {
 		slog.Warn("watchdog journal unavailable; kernel playback checks remain active", "error", probe.JournalErr)
@@ -100,12 +108,10 @@ func (r *Runner) poll(ctx context.Context) error {
 	if probe.StatusErr != nil && state.observing() {
 		slog.Warn("watchdog decoder service status unavailable", "error", probe.StatusErr)
 	}
-	if probe.JournalErr == nil && probe.Gap && !r.blocked {
+	if probe.JournalErr == nil && probe.Gap {
 		slog.Warn("watchdog journal continuity lost; missing history cannot be reconstructed", "caught_up", probe.CaughtUp)
 	}
-	return r.Store.Update(probe.Records, now, func(s *State) error {
-		return engine.Step(s, &probe, now)
-	})
+	return nil
 }
 
 func (r *Runner) mailLoop(ctx context.Context) {
