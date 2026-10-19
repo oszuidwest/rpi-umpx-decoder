@@ -45,7 +45,17 @@ To prevent SD card wear from verbose logging, all MicroMPX logs are written to a
 
 If you enable heartbeat monitoring during installation, the system will perform a `wget --spider` request to your specified URL every minute, which works with uptime monitoring services like [Uptime Robot](https://uptimerobot.com/?rid=6f699dbd539740).
 
+# Optional local Go watchdog
+
+For M365 email alerts about logged buffer starvation, inserted silence or stalled
+primary MPX playback, see the [local MicroMPX watchdog](docs/micrompx-watchdog.md).
+It runs independently on each decoder Pi, uses only the Go standard library and
+never restarts, resets or changes the decoder. Installation is optional and manual:
+`install.sh` does not install it. Start in preview mode
+before enabling real mail.
+
 # Troubleshooting
+
 If the script exits with "No HiFiBerry card configured", make sure you've added the correct `dtoverlay` line to your `/boot/firmware/config.txt` file and rebooted.
 
 If the service won't start, check `journalctl -u micrompx -f` for error messages. Common issues include port 8080 already being in use or the audio device not being properly configured.
