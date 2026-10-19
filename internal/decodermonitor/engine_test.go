@@ -102,6 +102,9 @@ func TestEngineKernelWatchdogWithoutJournalOrHTTP(t *testing.T) {
 				p := healthyProbe(now, uint64(i)*1920000)
 				tc.change(p)
 				advance(t, &e, &s, p, now)
+				if i < cfg.StalledChecks && s.Incident.ID != 0 {
+					t.Fatal("playback stall opened before enough comparisons")
+				}
 			}
 			if s.Incident.Severity != "critical" || len(s.Outbox) != 1 {
 				t.Fatalf("silent freeze not detected: %+v", s)
@@ -186,7 +189,8 @@ func TestEngineOutboxBackpressureDoesNotDropMail(t *testing.T) {
 	at := time.Now()
 	p := healthyProbe(at, 0)
 	p.Active = "inactive"
-	if err := e.Step(&s, p, at); err == nil {
+	advance(t, &e, &s, p, at)
+	if err := e.Step(&s, p, at.Add(10*time.Second)); err == nil {
 		t.Fatal("full outbox silently dropped an incident")
 	}
 	if len(s.Outbox) != maxOutbox {
@@ -196,12 +200,21 @@ func TestEngineOutboxBackpressureDoesNotDropMail(t *testing.T) {
 
 func TestEngineFaultsAndMissingTelemetry(t *testing.T) {
 	for _, tc := range []struct {
-		name, state string
-		owner       int
-		want        string
+		name   string
+		change func(*Probe)
+		reason string
 	}{
-		{"xrun", "XRUN", 100, "critical"}, {"closed", "closed", 0, "critical"},
-		{"missing", "unavailable", 0, ""}, {"foreign_audio", "RUNNING", 200, ""},
+		{"inactive", func(p *Probe) { p.Active = "inactive" }, "decoder service is not active"},
+		{"deactivating", func(p *Probe) { p.Active, p.MainPID = "deactivating", 0 }, "decoder service is not active"},
+		{"no_pid", func(p *Probe) { p.MainPID = 0 }, "decoder service is not active"},
+		{"negative_pid", func(p *Probe) { p.MainPID = -1 }, "decoder service is not active"},
+		{"xrun", func(p *Probe) { p.PCM.State = "XRUN" }, "playback PCM is not running (XRUN)"},
+		{"closed", func(p *Probe) { p.PCM = PCM{State: "closed"} }, "playback PCM is not running (closed)"},
+		{"journal_unavailable", func(p *Probe) {
+			p.Active, p.Gap, p.CaughtUp = "inactive", true, false
+		}, "decoder service is not active"},
+		{"missing", func(p *Probe) { p.PCM = PCM{State: "unavailable"} }, ""},
+		{"foreign_audio", func(p *Probe) { p.PCM.Owner = 200 }, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -210,15 +223,125 @@ func TestEngineFaultsAndMissingTelemetry(t *testing.T) {
 			e, s := Engine{cfg}, State{Version: 1}
 			at := time.Now()
 			p := healthyProbe(at, 0)
-			p.PCM.State, p.PCM.Owner = tc.state, tc.owner
+			tc.change(p)
 			advance(t, &e, &s, p, at)
-			if s.Incident.Severity != tc.want {
-				t.Fatalf("got %s; want %s", s.Incident.Severity, tc.want)
+			if s.Incident.ID != 0 || len(s.Outbox) != 0 || s.observing() {
+				t.Fatalf("first fault or missing telemetry was not unknown: %+v", s)
 			}
-			if tc.want == "" && s.observing() {
-				t.Fatal("unverified telemetry was considered healthy")
+			at = at.Add(10 * time.Second)
+			p = healthyProbe(at, 1920000)
+			tc.change(p)
+			advance(t, &e, &s, p, at)
+			if tc.reason == "" {
+				if s.Incident.ID != 0 || len(s.Outbox) != 0 || s.observing() {
+					t.Fatalf("unverified telemetry became health or an incident: %+v", s)
+				}
+			} else if s.Incident.Severity != "critical" || s.Incident.Reason != tc.reason || len(s.Outbox) != 1 {
+				t.Fatalf("two faults did not confirm the original critical reason: %+v", s)
 			}
 		})
+	}
+}
+
+func TestEngineExplicitFaultsRequireContinuousPolls(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		interrupt func(*testing.T, *Engine, *State, time.Time) time.Time
+	}{
+		{"healthy", func(t *testing.T, e *Engine, s *State, at time.Time) time.Time {
+			advance(t, e, s, healthyProbe(at, 1920000), at)
+			return at.Add(10 * time.Second)
+		}},
+		{"service_unknown", func(t *testing.T, e *Engine, s *State, at time.Time) time.Time {
+			p := healthyProbe(at, 1920000)
+			p.Active = "unknown"
+			advance(t, e, s, p, at)
+			return at.Add(10 * time.Second)
+		}},
+		{"pcm_unavailable", func(t *testing.T, e *Engine, s *State, at time.Time) time.Time {
+			p := healthyProbe(at, 1920000)
+			p.PCM.State = "unavailable"
+			advance(t, e, s, p, at)
+			return at.Add(10 * time.Second)
+		}},
+		{"foreign_audio", func(t *testing.T, e *Engine, s *State, at time.Time) time.Time {
+			p := healthyProbe(at, 1920000)
+			p.PCM.Owner = 200
+			advance(t, e, s, p, at)
+			return at.Add(10 * time.Second)
+		}},
+		{"failed_read", func(t *testing.T, e *Engine, s *State, at time.Time) time.Time {
+			if err := e.Failed(s, at); err != nil {
+				t.Fatal(err)
+			}
+			return at.Add(10 * time.Second)
+		}},
+		{"late_poll", func(_ *testing.T, _ *Engine, _ *State, at time.Time) time.Time {
+			return at.Add(20*time.Second + time.Nanosecond)
+		}},
+		{"clock_rewind", func(_ *testing.T, _ *Engine, _ *State, at time.Time) time.Time {
+			return at.Add(-20 * time.Second)
+		}},
+		{"boot_changed", func(_ *testing.T, _ *Engine, s *State, at time.Time) time.Time {
+			s.BootID = "previous-boot"
+			return at
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := DefaultConfig()
+			cfg.Site = "Test"
+			e, s := Engine{cfg}, State{Version: 1}
+			at := time.Now()
+			p := healthyProbe(at, 0)
+			p.Active = "inactive"
+			advance(t, &e, &s, p, at)
+			at = tc.interrupt(t, &e, &s, at.Add(10*time.Second))
+			p = healthyProbe(at, 2*1920000)
+			p.Active = "inactive"
+			advance(t, &e, &s, p, at)
+			if s.Incident.ID != 0 || len(s.Outbox) != 0 || s.observing() {
+				t.Fatalf("nonconsecutive faults opened an incident or counted as health: %+v", s)
+			}
+			at = at.Add(10 * time.Second)
+			advance(t, &e, &s, p, at)
+			if s.Incident.Severity != "critical" || len(s.Outbox) != 1 {
+				t.Fatalf("fault confirmation did not resume after interruption: %+v", s)
+			}
+		})
+	}
+}
+
+func TestEngineExplicitFaultDebouncesEscalationAndBlocksRecovery(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultConfig()
+	cfg.Site = "Test"
+	e, s := Engine{cfg}, State{Version: 1}
+	at := time.Now()
+	advance(t, &e, &s, healthyProbe(at, 0), at)
+	at = at.Add(10 * time.Second)
+	p := healthyProbe(at, 1920000)
+	p.Records = []Record{impactRecord(at)}
+	advance(t, &e, &s, p, at)
+	if s.Incident.CleanSince.IsZero() {
+		t.Fatal("healthy playback did not start the clean interval")
+	}
+	lastImpact := s.Incident.LastImpact
+	at = at.Add(10 * time.Second)
+	p = healthyProbe(at, 2*1920000)
+	p.PCM.State = "closed"
+	advance(t, &e, &s, p, at)
+	if s.observing() || !s.Incident.CleanSince.IsZero() || s.Incident.Severity != "warning" ||
+		!s.Incident.LastImpact.Equal(lastImpact) || len(s.Outbox) != 1 {
+		t.Fatalf("first fault escalated or accrued recovery credit: %+v", s)
+	}
+	at = at.Add(10 * time.Second)
+	p = healthyProbe(at, 3*1920000)
+	p.Active = "inactive"
+	advance(t, &e, &s, p, at)
+	if s.Incident.Severity != "critical" || s.Incident.Reason != "decoder service is not active" ||
+		!s.Incident.LastImpact.Equal(at) || len(s.Outbox) != 2 {
+		t.Fatalf("consecutive explicit faults did not escalate: %+v", s)
 	}
 }
 
@@ -320,7 +443,14 @@ func TestEngineRemindersAreDeduplicated(t *testing.T) {
 	p := healthyProbe(at, 0)
 	p.Active = "inactive"
 	advance(t, &e, &s, p, at)
-	for i := 1; i <= 190; i++ {
+	if len(s.Outbox) != 0 {
+		t.Fatal("unconfirmed fault queued mail")
+	}
+	advance(t, &e, &s, p, at.Add(10*time.Second))
+	if s.Incident.Severity != "critical" || len(s.Outbox) != 1 {
+		t.Fatal("confirmed fault did not queue the initial critical")
+	}
+	for i := 2; i <= 190; i++ {
 		now := at.Add(time.Duration(i) * 10 * time.Second)
 		p := healthyProbe(now, 0)
 		p.Active = "inactive"
@@ -349,7 +479,10 @@ func ExampleEngine() {
 	p := healthyProbe(now, 0)
 	p.Active = "inactive"
 	engine := Engine{Config: cfg}
-	err := engine.Step(&s, p, now)
+	if err := engine.Step(&s, p, now); err != nil {
+		panic(err)
+	}
+	err := engine.Step(&s, p, now.Add(10*time.Second))
 	fmt.Println(err, s.Incident.Severity, s.Outbox[0].Preview)
 	// Output: <nil> critical true
 }

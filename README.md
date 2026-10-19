@@ -48,7 +48,8 @@ If you enable heartbeat monitoring during installation, the system will perform 
 # Optional local Go watchdog
 
 For M365 email alerts about logged buffer starvation, inserted silence or stalled
-primary MPX playback, see the [local MicroMPX watchdog](docs/micrompx-watchdog.md).
+primary MPX playback and observed decoder restarts/stops, see the
+[local MicroMPX watchdog](docs/micrompx-watchdog.md).
 It runs independently on each decoder Pi, uses only the Go standard library and
 never restarts, resets or changes the decoder. Installation is optional and manual:
 `install.sh` does not install it. Start in preview mode

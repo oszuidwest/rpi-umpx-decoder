@@ -45,17 +45,18 @@ type PCM struct {
 
 // Probe reports both journal continuity and playback progress independently.
 type Probe struct {
-	Bookmark   Bookmark // where the next read continues
-	BootID     string
-	Monotonic  float64
-	Gap        bool // overlap entry not found or journal unreadable; history may be missing
-	CaughtUp   bool
-	Active     string
-	MainPID    int
-	PCM        PCM
-	Records    []Record
-	JournalErr error // journal unreadable; Gap is set and Bookmark is the input
-	StatusErr  error // systemctl failed; Active is "unknown"
+	Bookmark             Bookmark // where the next read continues
+	BootID               string
+	Monotonic            float64
+	Gap                  bool // overlap entry not found or journal unreadable; history may be missing
+	CaughtUp             bool
+	Active               string
+	ActiveEnterMonotonic float64 // seconds of CLOCK_MONOTONIC; zero means never active
+	MainPID              int
+	PCM                  PCM
+	Records              []Record
+	JournalErr           error // journal unreadable; Gap is set and Bookmark is the input
+	StatusErr            error // systemctl failed; Active is "unknown"
 }
 
 func (p *Probe) unverified() bool {
@@ -99,7 +100,7 @@ func (p LocalProbe) Read(ctx context.Context, bookmark Bookmark) (Probe, error) 
 	result.BootID = strings.TrimSpace(boot)
 	result.PCM = readPCM(root, p.PCMStatus)
 	statusCtx, statusCancel := context.WithTimeout(ctx, 2*time.Second)
-	result.Active, result.MainPID, result.StatusErr = serviceStatus(statusCtx)
+	result.Active, result.MainPID, result.ActiveEnterMonotonic, result.StatusErr = serviceStatus(statusCtx)
 	statusCancel()
 	if result.StatusErr != nil {
 		result.Active = "unknown"
@@ -247,19 +248,24 @@ func journalText(value any) string {
 	return ""
 }
 
-func serviceStatus(ctx context.Context) (active string, pid int, err error) {
-	cmd := exec.CommandContext(ctx, "/usr/bin/systemctl", "show", "--no-pager", "micrompx.service", "-p", "ActiveState", "-p", "MainPID")
+func serviceStatus(ctx context.Context) (active string, pid int, activeEnter float64, err error) {
+	cmd := exec.CommandContext(ctx, "/usr/bin/systemctl", "show", "--no-pager", "micrompx.service", "-p", "ActiveState", "-p", "MainPID", "-p", "ActiveEnterTimestampMonotonic")
 	cmd.WaitDelay = time.Second
 	output, err := cmd.Output()
 	if err != nil {
-		return "", 0, fmt.Errorf("read decoder service status: %w", err)
+		return "", 0, 0, fmt.Errorf("read decoder service status: %w", err)
 	}
-	values := parseFields(string(output), "=")
-	pid, err = strconv.Atoi(values["MainPID"])
-	if err != nil || values["ActiveState"] == "" {
-		return "", 0, fmt.Errorf("incomplete decoder service status")
+	return parseServiceStatus(string(output))
+}
+
+func parseServiceStatus(output string) (active string, pid int, activeEnter float64, err error) {
+	values := parseFields(output, "=")
+	pid, pidErr := strconv.Atoi(values["MainPID"])
+	entered, enteredErr := strconv.ParseUint(values["ActiveEnterTimestampMonotonic"], 10, 64)
+	if pidErr != nil || pid < 0 || enteredErr != nil || values["ActiveState"] == "" {
+		return "", 0, 0, fmt.Errorf("incomplete decoder service status")
 	}
-	return values["ActiveState"], pid, nil
+	return values["ActiveState"], pid, float64(entered) / 1e6, nil
 }
 
 func readProc(root *os.Root, name string) (string, error) {

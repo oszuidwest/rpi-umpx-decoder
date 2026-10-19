@@ -308,6 +308,10 @@ func TestJournalGapIsLoggedWhenItsObservationCommits(t *testing.T) {
 	}
 	probe := &gapProbe{inactive: true}
 	r := Runner{Config: cfg, Store: store, Probe: probe}
+	if err := r.poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	logs.Reset() // The first fault is unknown and commits; only confirmation needs mail.
 	if err := r.poll(t.Context()); !errors.Is(err, errOutboxFull) {
 		t.Fatalf("expected a rejected poll: %v", err)
 	}
