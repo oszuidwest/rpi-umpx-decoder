@@ -108,20 +108,8 @@ func TestJournalNonTextualAndLargeMessagesAdvance(t *testing.T) {
 
 func TestReadPCMUsesProcStatusWithoutOpeningAudio(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	for _, path := range []string{"asound/hifiberry/pcm0p/sub0", "321"} {
-		if err := os.MkdirAll(filepath.Join(dir, path), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	status := "state: RUNNING\nowner_pid: 321\ntrigger_time: 123.456\nhw_ptr: 1000\nappl_ptr: 2000\n"
+	dir := testProcRoot(t)
 	path := filepath.Join(dir, "asound", "hifiberry", "pcm0p", "sub0", "status")
-	if err := os.WriteFile(path, []byte(status), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "321", "status"), []byte("Name: MicroMPX\nTgid: 100\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		t.Fatal(err)
