@@ -2,12 +2,16 @@
 Description=Local observe-only MicroMPX watchdog
 After=network-online.target micrompx.service
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
 
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/micrompx-watchdog -config /etc/micrompx-watchdog/config.json
-# No decoder restart/reset is supported. The watchdog itself is also not auto-restarted.
-Restart=no
+# Never restarts/resets the decoder. Only watchdog failures are restarted.
+# After the start limit is hit it stays stopped; an optional heartbeat expires.
+Restart=on-failure
+RestartSec=10
 TimeoutStopSec=60
 User=micrompx-watchdog
 Group=micrompx-watchdog

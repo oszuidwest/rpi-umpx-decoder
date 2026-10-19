@@ -52,7 +52,11 @@ primary MPX playback, see the [local MicroMPX watchdog](docs/micrompx-watchdog.m
 It runs independently on each decoder Pi, uses only the Go standard library and
 never restarts, resets or changes the decoder. Installation is optional and manual:
 `install.sh` does not install it. Start in preview mode
-before enabling real mail.
+before enabling real mail. The example service restarts only the watchdog on failure,
+with a ten-second delay and at most three starts within five minutes. Normal stops
+are not restarted. If the start limit is hit, it stays stopped and the optional
+heartbeat expires; fix the cause, then reset the failed watchdog unit and start it
+again as described in the watchdog guide.
 
 # Troubleshooting
 
